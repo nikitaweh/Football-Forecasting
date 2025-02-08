@@ -1,0 +1,29 @@
+import tkinter as tk
+from tkinter import messagebox
+
+def say_hello():
+    user_name = entry.get()
+    if user_name:
+        messagebox.showinfo("Hello", f"Hello, {user_name}!")
+    else:
+        messagebox.showwarning("Input Error", "Please enter your name.")
+
+# Hauptfenster erstellen
+root = tk.Tk()
+root.title("Beispiel mit Tkinter")
+root.geometry("300x200")
+
+# Label hinzufügen
+label = tk.Label(root, text="Gib deinen Namen ein:")
+label.pack(pady=10)
+
+# Eingabefeld hinzufügen
+entry = tk.Entry(root)
+entry.pack(pady=10)
+
+# Button hinzufügen
+button = tk.Button(root, text="Sag Hallo", command=say_hello)
+button.pack(pady=10)
+
+# Haupt-Loop der GUI starten
+root.mainloop()
