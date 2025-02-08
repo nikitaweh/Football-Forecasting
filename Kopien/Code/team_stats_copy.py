@@ -5,12 +5,15 @@ from bs4 import BeautifulSoup
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-# Define the directory path for saving the CSV files based on the script's location
-current_directory = os.path.dirname(os.path.abspath(__file__))
+# Definiere den Ordner, in dem die Ausgabedateien gespeichert werden sollen
+output_directory = "C:/AI Projekt/KI-Projekt/Kopien/Datensammlungen"
 
-seasons = ["2024-2025"]
+# Falls benötigt, kannst du weiterhin den aktuellen Skriptpfad ermitteln
+# current_directory = os.path.dirname(os.path.abspath(__file__))
+
+seasons = ["2017-2018", "2018-2019", "2019-2020", "2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"]
 current_season = "2024-2025"
-current_matchday = 15
+current_matchday = 21
 
 class BundesligaStatsScraper:
     def __init__(self, seasons, current_season, current_matchday, total_matchdays=34):
@@ -21,6 +24,7 @@ class BundesligaStatsScraper:
         self.head_to_head_stats = defaultdict(lambda: {'games': 0, 'home_goals': 0, 'away_goals': 0, 'home_wins': 0, 'away_wins': 0, 'draws': 0})
         self.match_results = []
         self.merged_teams = {"HDH": "FCH"}  # Kürzel für das Merging
+        self.match_id_counter = 1  # Zähler für eindeutige Match-IDs
 
     def fetch_match_data(self):
         for season in self.seasons:
@@ -67,14 +71,10 @@ class BundesligaStatsScraper:
                             else:  # Spiele ab Januar gehören zum Endjahr
                                 match_year = season_end_year
 
-                            # Bestimme Sommer- und Winterzeit für das Jahr des Spiels
                             last_sunday_march = last_sunday(match_year, 3)
                             last_sunday_october = last_sunday(match_year, 10)
-
-                            # Erstelle das vollständige Datum des Spiels
                             match_date = datetime.strptime(f"{day} {match_year}", "%d %B %Y")
 
-                            # Direkter Vergleich für Sommer- und Winterzeit
                             if last_sunday_march <= match_date < last_sunday_october:
                                 time_obj += timedelta(hours=2)  # Sommerzeit
                             else:
@@ -83,36 +83,32 @@ class BundesligaStatsScraper:
                             time = time_obj.strftime("%H:%M")
                         except ValueError:
                             print(f"Error parsing time: {time_str} or date: {day}")
-                            time = time_str  # Fallback: Originalzeit
+                            time = time_str
 
                         date_time_mapping.append({"header": date_header, "date": date, "time": time, "year": match_year, "matches": []})
 
                 if not date_time_mapping:
                     print(f"No date-time headers found for matchday {matchday}.")
-                    continue  # Überspringe diesen Spieltag, wenn keine Header gefunden wurden
+                    continue
 
                 # Verknüpfe `score-bug`-Elemente mit dem passenden `match-date-header`
                 current_index = 0
                 score_bugs = soup.find_all("score-bug", class_="ng-star-inserted")
                 for score_bug in score_bugs:
-                    # Sicherheitsprüfung für `current_index`
                     if current_index >= len(date_time_mapping):
                         print(f"Error: current_index {current_index} out of range for date_time_mapping.")
                         break
 
-                    # Finde den nächstliegenden vorherigen Header
                     while current_index < len(date_time_mapping) - 1 and date_time_mapping[current_index + 1]["header"].find_next("score-bug") == score_bug:
                         current_index += 1
                     date_time_mapping[current_index]["matches"].append(score_bug)
 
-                # Verarbeite die Zuordnungen
                 for entry in date_time_mapping:
                     date = entry["date"]
                     time = entry["time"]
                     match_year = entry["year"]
                     for score_bug in entry["matches"]:
                         try:
-                            # Extrahiere Teams und Ergebnisse
                             home_team_tag = score_bug.find('div', class_=["cell home", "cell home white"])
                             away_team_tag = score_bug.find('div', class_=["cell away", "cell away white"])
 
@@ -127,7 +123,9 @@ class BundesligaStatsScraper:
 
                             result = "Win" if home_score_int > away_score_int else "Loss" if home_score_int < away_score_int else "Draw"
 
-                            # Verhindere doppelte Einträge
+                            home_team = self.resolve_team_short(home_team)
+                            away_team = self.resolve_team_short(away_team)
+
                             if [season, matchday, date, match_year, time, home_team, home_score_int, away_team, away_score_int, result] not in self.match_results:
                                 self.match_results.append([
                                     season, matchday, date, match_year, time, home_team, home_score_int, away_team, away_score_int, result
@@ -140,11 +138,9 @@ class BundesligaStatsScraper:
             print(f"Finished fetching results for season {season}.\n")
 
     def resolve_team_short(self, team_short):
-        """Gibt das aufgelöste Kürzel zurück, falls es zusammengeführt werden soll."""
         return self.merged_teams.get(team_short, team_short)
 
     def update_head_to_head_stats(self, home_team, away_team, home_goals, away_goals):
-        """Aktualisiert die Head-to-Head-Statistiken für die Teams."""
         home_team = self.resolve_team_short(home_team)
         away_team = self.resolve_team_short(away_team)
         matchup = (home_team, away_team)
@@ -159,8 +155,9 @@ class BundesligaStatsScraper:
         else:
             self.head_to_head_stats[matchup]['draws'] += 1
 
-    def save_to_csv(self, filename="head_to_head_copy.csv"):
-        file_path = os.path.join(current_directory, filename)
+    def save_to_csv(self, filename="head_to_head.csv"):
+        # Speichere die CSV im output_directory
+        file_path = os.path.join(output_directory, filename)
         with open(file_path, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
             writer.writerow([
@@ -185,15 +182,18 @@ class BundesligaStatsScraper:
                     f"{home_win_rate:.2f}", f"{away_win_rate:.2f}", f"{draw_rate:.2f}"
                 ])
 
-    def save_match_results_to_csv(self, filename="past_season_results_copy.csv"):
-        file_path = os.path.join(current_directory, filename)
+    def save_match_results_to_csv(self, filename="past_season_results.csv"):
+        # Speichere die CSV im output_directory
+        file_path = os.path.join(output_directory, filename)
         with open(file_path, mode='w', newline='', encoding='utf-8') as file:
             writer = csv.writer(file)
-            writer.writerow(["Season", "Matchday", "Date", "Year", "Time", "Home Team", "Home Goals", "Away Team", "Away Goals", "Result"])
-            writer.writerows(self.match_results)
+            writer.writerow(["Match ID", "Season", "Matchday", "Date", "Year", "Time", "Home Team", "Home Goals", "Away Team", "Away Goals", "Result"])
+            for match in self.match_results:
+                writer.writerow([self.match_id_counter] + match)
+                self.match_id_counter += 1
 
 # Hauptteil des Programms
 scraper = BundesligaStatsScraper(seasons, current_season, current_matchday)
 scraper.fetch_match_data()
-scraper.save_to_csv("head_to_head_copy.csv")
-scraper.save_match_results_to_csv("past_season_results_copy.csv")
+scraper.save_to_csv("head_to_head.csv")
+scraper.save_match_results_to_csv("past_season_results.csv")

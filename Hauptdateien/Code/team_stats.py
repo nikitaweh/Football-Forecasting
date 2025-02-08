@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 # Definiere den Ordner, in dem die Ausgabedateien gespeichert werden sollen
-output_directory = "C:/AI Projekt/Webscraping/Hauptdateien/Datensammlungen"
+output_directory = "C:/AI Projekt/KI-Projekt/Hauptdateien/Datensammlungen"
 
 # Falls benötigt, kannst du weiterhin den aktuellen Skriptpfad ermitteln
 # current_directory = os.path.dirname(os.path.abspath(__file__))
