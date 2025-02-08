@@ -4,11 +4,11 @@ import requests
 import pandas as pd
 
 # Pfade zu den Eingabedateien und zum Output
-historic_weather_file = "C:/AI Projekt/Webscraping/Hauptdateien/Datensammlungen/bereinigte_datei.csv"
-team_location_file = "C:/AI Projekt/Webscraping/Hauptdateien/Datensammlungen/team_location.csv"
-past_season_file = "C:/AI Projekt/Webscraping/Hauptdateien/Datensammlungen/past_season_results.csv"
-output_csv_file = os.path.join("C:/AI Projekt/Webscraping/Hauptdateien/Datensammlungen", "historical_weather_data.csv")
-city_coordinates_file = "C:/AI Projekt/Webscraping/Hauptdateien/Datensammlungen/city_coordinates.csv"
+historic_weather_file = "C:/AI Projekt/KI-Projekt/Hauptdateien/Datensammlungen/bereinigte_datei.csv"
+team_location_file = "C:/AI Projekt/KI-Projekt/Hauptdateien/Datensammlungen/team_location.csv"
+past_season_file = "C:/AI Projekt/KI-Projekt/Hauptdateien/Datensammlungen/past_season_results.csv"
+output_csv_file = os.path.join("C:/AI Projekt/KI-Projekt/Hauptdateien/Datensammlungen", "historical_weather_data.csv")
+city_coordinates_file = "C:/AI Projekt/KI-Projekt/Hauptdateien/Datensammlungen/city_coordinates.csv"
 
 # OpenWeather API Key (wie von dir angegeben)
 API_KEY = "8738a0031c3e965eaece939dbc7faf1d"
@@ -37,13 +37,13 @@ def get_weather_offsets(match_dt):
                 pd.Timedelta(hours=1),
                 pd.Timedelta(hours=2),
                 pd.Timedelta(hours=3)]
-
+"""
 def main():
-    """
+    
     Verarbeitet alle Spieldaten aus past_season_file, deren Datum vor dem 04.01.2025 liegt,
     und erstellt daraus die CSV mithilfe der lokalen historischen Wetterdaten.
     Dabei werden fehlende Werte für Regen und Schnee durch 0 ersetzt.
-    """
+    
     # 1. CSV-Dateien einlesen
     weather_df = pd.read_csv(historic_weather_file)
     team_location_df = pd.read_csv(team_location_file)
@@ -114,10 +114,13 @@ def main():
     # 9.1 Entferne Duplikate, sodass jede Uhrzeit pro Spiel maximal einmal vorkommt
     final_df = final_df.drop_duplicates(subset=['Match ID', 'Home Team', 'City', 'DateTime'])
     
-    # 10. Ergebnis in CSV speichern (Überschreibt ggf. eine bestehende Datei)
+    # 10. Sicherstellen, dass der Zielordner existiert; andernfalls anlegen
+    os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
+    
+    # 11. Ergebnis in CSV speichern (Überschreibt ggf. eine bestehende Datei)
     final_df.to_csv(output_csv_file, index=False)
     print("CSV-Datei (Spiele bis 04.01.2025) wurde erstellt:", output_csv_file)
-
+"""
 def query_api_data_by_match_id():
     """
     Liest die bestehende CSV (historical_weather_data.csv) ein und ermittelt anhand der
@@ -264,5 +267,5 @@ def query_api_data_by_match_id():
     print("Neue maximale Match ID in CSV:", updated_df["Match ID"].max())
 
 if __name__ == '__main__':
-    main()
+#   main()
     query_api_data_by_match_id()
