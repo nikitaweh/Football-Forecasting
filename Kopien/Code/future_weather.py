@@ -3,6 +3,7 @@ import csv
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+import pandas as pd  # Für pd.Timedelta
 
 # Definiere den Ordner, in dem die Dateien gespeichert sind
 output_directory = "C:/AI Projekt/KI-Projekt/Kopien/Datensammlungen"
@@ -49,14 +50,26 @@ def last_sunday(year, month):
     last_day = datetime(year, month + 1, 1) - timedelta(days=1)
     return last_day - timedelta(days=(last_day.weekday() + 1) % 7)
 
+def get_weather_offsets(match_dt):
+    """
+    Liefert eine Liste von Offsets (als pd.Timedelta) für den stündlichen Forecast.
+    Diese Offsets werden nur für Spiele innerhalb der nächsten 4 Tage angewandt.
+    """
+    if match_dt.minute == 0:
+        return [pd.Timedelta(hours=0), pd.Timedelta(hours=1), pd.Timedelta(hours=2), pd.Timedelta(hours=3)]
+    elif match_dt.minute == 30:
+        return [pd.Timedelta(minutes=-30), pd.Timedelta(minutes=30), pd.Timedelta(minutes=90), pd.Timedelta(minutes=150)]
+    else:
+        return [pd.Timedelta(hours=0), pd.Timedelta(hours=1), pd.Timedelta(hours=2), pd.Timedelta(hours=3)]
+
 class BundesligaStatsScraper:
     def __init__(self, seasons, current_season, current_matchday, total_matchdays=34):
         self.seasons = seasons
         self.current_season = current_season
         self.current_matchday = current_matchday
         self.total_matchdays = total_matchdays
-        # Zunächst speichern wir die gescrapten Spiele als Dictionary,
-        # später werden diese mit den Wetterdaten angereichert.
+        # Zunächst speichern wir die gescrapten Spiele als Dictionary.
+        # Später werden diese mit den Wetterdaten angereichert.
         self.match_results = []  
         self.merged_teams = {"HDH": "FCH"}  # Kürzel für ein mögliches Merging
 
@@ -157,15 +170,18 @@ class BundesligaStatsScraper:
     def get_weather_data(self, match_datetime, lat, lon, api_key):
         """
         Holt den Wetterforecast für die angegebene Zeit und Position.
-        Nutzt den stündlichen Forecast, wenn das Spiel in den nächsten 4 Tagen stattfindet,
-        ansonsten den täglichen Forecast (bis zu 16 Tage).
+        Für Spiele innerhalb der nächsten 4 Tage wird der stündliche Forecast
+        genutzt – es wird für jeden berechneten Offset ein eigener Forecast (als Dictionary)
+        ermittelt und in einer Liste zurückgegeben.
+        Für Spiele außerhalb der nächsten 4 Tage erfolgt der tägliche Forecast,
+        wobei eine Liste mit einem Element zurückgegeben wird.
         """
         now = datetime.now()
         if match_datetime < now:
             return None
 
+        # Spiele innerhalb der nächsten 4 Tage: stündlicher Forecast mit Offsets
         if match_datetime - now <= timedelta(days=4):
-            # Stündlicher Forecast
             url = f"https://pro.openweathermap.org/data/2.5/forecast/hourly?lat={lat}&lon={lon}&appid={api_key}"
             try:
                 response = requests.get(url)
@@ -174,17 +190,48 @@ class BundesligaStatsScraper:
                 print(f"Fehler beim Abruf des stündlichen Forecasts: {e}")
                 return None
 
-            best_forecast = None
-            min_diff = float('inf')
-            for forecast in data.get("list", []):
-                forecast_time = datetime.fromtimestamp(forecast["dt"])
-                diff = abs((match_datetime - forecast_time).total_seconds())
-                if diff < min_diff:
-                    min_diff = diff
-                    best_forecast = forecast
-            forecast_type = "hourly"
+            offsets = get_weather_offsets(match_datetime)
+            forecast_list = data.get("list", [])
+            forecasts = []  # Liste der Forecast-Dictionaries
+
+            for offset in offsets:
+                target_time = match_datetime + offset.to_pytimedelta()
+                best_forecast = None
+                min_diff = float('inf')
+                for forecast in forecast_list:
+                    forecast_time = datetime.fromtimestamp(forecast["dt"])
+                    diff = abs((target_time - forecast_time).total_seconds())
+                    if diff < min_diff:
+                        min_diff = diff
+                        best_forecast = forecast
+                if best_forecast:
+                    try:
+                        temp_k = best_forecast["main"]["temp"]
+                        pressure = best_forecast["main"]["pressure"]
+                        humidity = best_forecast["main"]["humidity"]
+                        wind_speed = best_forecast["wind"]["speed"]
+                        wind_direction = best_forecast["wind"].get("deg", None)
+                        rain = best_forecast.get("rain", {}).get("1h", 0)
+                        snow = best_forecast.get("snow", {}).get("1h", 0)
+                        forecast_dict = {
+                            "forecast_dt": target_time.strftime("%d %B %Y %H:%M"),
+                            "temp_c": round(temp_k - 273.15, 2),
+                            "pressure": pressure,
+                            "humidity": humidity,
+                            "wind_speed": wind_speed,
+                            "wind_direction": wind_direction,
+                            "rain": rain,
+                            "snow": snow
+                        }
+                        forecasts.append(forecast_dict)
+                    except Exception as e:
+                        print(f"Fehler bei der Verarbeitung eines Forecasts: {e}")
+            if len(forecasts) == 0:
+                return None
+            return forecasts
+
         else:
-            # Täglicher Forecast (bis zu 16 Tage)
+            # Täglicher Forecast (bis zu 16 Tage) – hier wird eine Liste mit einem Element zurückgegeben.
             cnt = 16
             url = f"https://api.openweathermap.org/data/2.5/forecast/daily?lat={lat}&lon={lon}&cnt={cnt}&appid={api_key}"
             try:
@@ -201,91 +248,89 @@ class BundesligaStatsScraper:
                 if forecast_date == match_date:
                     best_forecast = forecast
                     break
-            forecast_type = "daily"
-
-        if best_forecast is None:
-            return None
-
-        try:
-            if forecast_type == "hourly":
-                temp_k = best_forecast["main"]["temp"]
-                pressure = best_forecast["main"]["pressure"]
-                humidity = best_forecast["main"]["humidity"]
-                wind_speed = best_forecast["wind"]["speed"]
-                wind_direction = best_forecast["wind"].get("deg", None)
-                rain = best_forecast.get("rain", {}).get("1h", 0)
-                snow = best_forecast.get("snow", {}).get("1h", 0)
-            else:  # daily Forecast
+            if best_forecast is None:
+                return None
+            try:
                 temp_k = best_forecast["temp"]["day"]
                 pressure = best_forecast["pressure"]
                 humidity = best_forecast["humidity"]
-                # Hier erfolgt die Änderung: Im daily Forecast werden 'speed' und 'deg' verwendet.
                 wind_speed = best_forecast.get("speed", None)
                 wind_direction = best_forecast.get("deg", None)
                 rain = best_forecast.get("rain", 0)
                 snow = best_forecast.get("snow", 0)
-            temp_c = temp_k - 273.15
-            return {
-                "temp_c": round(temp_c, 2),
-                "pressure": pressure,
-                "humidity": humidity,
-                "wind_speed": wind_speed,
-                "wind_direction": wind_direction,
-                "rain": rain,
-                "snow": snow
-            }
-        except Exception as e:
-            print(f"Fehler beim Extrahieren der Wetterdaten: {e}")
-            return None
+                forecast_dict = {
+                    "forecast_dt": match_datetime.strftime("%d %B %Y %H:%M"),
+                    "temp_c": round(temp_k - 273.15, 2),
+                    "pressure": pressure,
+                    "humidity": humidity,
+                    "wind_speed": wind_speed,
+                    "wind_direction": wind_direction,
+                    "rain": rain,
+                    "snow": snow
+                }
+                return [forecast_dict]
+            except Exception as e:
+                print(f"Fehler beim Extrahieren der Wetterdaten: {e}")
+                return None
 
     def enrich_with_weather(self, api_key):
         """
         Für jedes Spiel wird anhand des Heimteams (mittels team_locations aus der CSV)
         die zugehörige Stadt und die geografischen Koordinaten ermittelt. Anschließend wird
-        der passende Wetterforecast abgefragt und der Datensatz um die Wetterinformationen
-        angereichert.
+        der passende Wetterforecast abgefragt. Für Spiele innerhalb der nächsten 4 Tage
+        wird für jeden Offset eine eigene Zeile erzeugt.
         """
         enriched_results = []
-        for idx, match in enumerate(self.match_results, start=1):
+        match_id = 1  # fortlaufende ID für jede Zeile
+
+        for match in self.match_results:
             home_team = match["home_team"]
             match_datetime = match["match_datetime"]
 
             city = "Unknown"
-            weather = {
-                "temp_c": None,
-                "pressure": None,
-                "humidity": None,
-                "wind_speed": None,
-                "wind_direction": None,
-                "rain": None,
-                "snow": None
-            }
             if home_team in team_locations:
                 location = team_locations[home_team]
                 city = location["city"]
                 lat = location["lat"]
                 lon = location["lon"]
                 weather_data = self.get_weather_data(match_datetime, lat, lon, api_key)
-                if weather_data:
-                    weather = weather_data
-                else:
-                    print(f"Wetterdaten konnten nicht abgerufen werden für {home_team} am {match_datetime}.")
             else:
                 print(f"Keine Standortdaten für {home_team} gefunden.")
+                weather_data = None
 
-            enriched_results.append({
-                "match_id": idx,
-                "home_team": home_team,
-                "city": city,
-                "datetime": match_datetime.strftime("%d %B %Y %H:%M"),
-                "temp_c": weather["temp_c"],
-                "pressure": weather["pressure"],
-                "humidity": weather["humidity"],
-                "wind_speed": weather["wind_speed"],
-                "wind_direction": weather["wind_direction"],
-                "rain": weather["rain"],
-                "snow": weather["snow"]
-            })
+            if weather_data:
+                for forecast in weather_data:
+                    enriched_results.append({
+                        "match_id": match_id,
+                        "home_team": home_team,
+                        "city": city,
+                        "datetime": forecast["forecast_dt"],
+                        "temp_c": forecast["temp_c"],
+                        "pressure": forecast["pressure"],
+                        "humidity": forecast["humidity"],
+                        "wind_speed": forecast["wind_speed"],
+                        "wind_direction": forecast["wind_direction"],
+                        "rain": forecast["rain"],
+                        "snow": forecast["snow"]
+                    })
+                    match_id += 1
+            else:
+                # Falls keine Wetterdaten abgerufen wurden, eine Zeile mit leeren Wetterfeldern
+                enriched_results.append({
+                    "match_id": match_id,
+                    "home_team": home_team,
+                    "city": city,
+                    "datetime": match_datetime.strftime("%d %B %Y %H:%M"),
+                    "temp_c": None,
+                    "pressure": None,
+                    "humidity": None,
+                    "wind_speed": None,
+                    "wind_direction": None,
+                    "rain": None,
+                    "snow": None
+                })
+                match_id += 1
+
         self.match_results = enriched_results
 
     def save_match_results_to_csv(self, filename="future_weather.csv"):
