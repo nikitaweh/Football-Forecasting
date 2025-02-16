@@ -11,9 +11,9 @@ output_directory = "C:/AI Projekt/KI-Projekt/Kopien/Datensammlungen"
 # Falls benötigt, kannst du weiterhin den aktuellen Skriptpfad ermitteln
 # current_directory = os.path.dirname(os.path.abspath(__file__))
 
-seasons = ["2017-2018", "2018-2019", "2019-2020", "2020-2021", "2021-2022", "2022-2023", "2023-2024", "2024-2025"]
+seasons = ["2024-2025"]
 current_season = "2024-2025"
-current_matchday = 21
+current_matchday = 22
 
 class BundesligaStatsScraper:
     def __init__(self, seasons, current_season, current_matchday, total_matchdays=34):
