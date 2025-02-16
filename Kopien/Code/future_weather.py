@@ -16,7 +16,7 @@ planned_start_times_file = os.path.join(output_directory, "planned_start_times.c
 # Parameter für den Scraper
 seasons = ["2024-2025"]
 current_season = "2024-2025"
-current_matchday = 22
+current_matchday = 23
 
 # OpenWeatherMap API Key (stündlicher bzw. täglicher Forecast)
 API_KEY = "abcc68d734dd721e64e567bb8c6c4bb8"
