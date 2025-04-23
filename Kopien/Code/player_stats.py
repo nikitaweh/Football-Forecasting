@@ -1,1 +1,0 @@
-#Fasst alle Informationen zu allen Spielen zusammen und erfasst deren Performance/Statistiken in allen Spielen und deren Einfluss
