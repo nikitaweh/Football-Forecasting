@@ -8,8 +8,8 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Konfiguration
 # ---------------------------
-INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/players_profiles_78.json"
-OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/players_activity_78.json"
+INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles_78.json"
+OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_activity_78.json"
 API_URL    = "https://v3.football.api-sports.io/players/seasons"
 HEADERS    = {
     'x-rapidapi-host': "v3.football.api-sports.io",
