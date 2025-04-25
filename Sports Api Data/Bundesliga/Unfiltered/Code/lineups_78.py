@@ -121,11 +121,11 @@ def collect_lineups():
 # ---------------------------
 # Planung: Automatische Ausführung jeden Samstag, Sonntag und Montag um 00:00 Uhr
 # ---------------------------
-schedule.every().saturday.at("00:01").do(collect_lineups)
-schedule.every().sunday.at("00:01").do(collect_lineups)
-schedule.every().monday.at("00:01").do(collect_lineups)
+schedule.every().saturday.at("00:00").do(collect_lineups)
+schedule.every().sunday.at("00:00").do(collect_lineups)
+schedule.every().monday.at("00:00").do(collect_lineups)
 
 print("Scheduler gestartet. Warte auf die nächsten Ausführungen ...")
 while True:
     schedule.run_pending()
-    time.sleep(60)  # Einmal pro Minute prüfen, ob ein geplanter Job fällig ist.
+    time.sleep(3600)  # Einmal pro Stunde prüfen, ob ein geplanter Job fällig ist.

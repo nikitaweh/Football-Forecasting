@@ -122,11 +122,11 @@ def collect_player_stats():
 # ---------------------------
 # Planung: Automatische Ausführung jeden Samstag, Sonntag und Montag um 00:00 Uhr
 # ---------------------------
-schedule.every().saturday.at("00:01").do(collect_player_stats)
-schedule.every().sunday.at("00:01").do(collect_player_stats)
-schedule.every().monday.at("00:01").do(collect_player_stats)
+schedule.every().saturday.at("01:00").do(collect_player_stats)
+schedule.every().sunday.at("01:00").do(collect_player_stats)
+schedule.every().monday.at("01:00").do(collect_player_stats)
 
 print("Scheduler gestartet. Warte auf die nächsten Ausführungen ...")
 while True:
     schedule.run_pending()
-    time.sleep(60)  # Alle 60 Sekunden prüfen, ob ein geplanter Job ansteht.
+    time.sleep(3600)  # Jede Stunde prüfen, ob ein geplanter Job ansteht.

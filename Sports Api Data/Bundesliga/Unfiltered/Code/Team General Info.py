@@ -1,6 +1,21 @@
 import http.client
 import json
+import os
 from datetime import datetime
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+# ---------------------------
+# Konfiguration
+# ---------------------------
+LEAGUES_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga.json"
+OUTPUT_FILE_PATH  = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga Teams.json"
+
+API_HOST = "v3.football.api-sports.io"
+HEADERS  = {
+    'x-rapidapi-host': "v3.football.api-sports.io",
+    'x-rapidapi-key': "5fa2372f2bfcbedb8ef7b85c86f0a27a"
+}
 
 def remove_keys(obj, keys_to_remove):
     """
@@ -17,74 +32,67 @@ def remove_keys(obj, keys_to_remove):
         for item in obj:
             remove_keys(item, keys_to_remove)
 
-# Pfad zur leagues_all.json und zum Output
-leagues_file_path = "C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga.json"
-output_file_path = "C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga Teams.json"
+def fetch_all_teams():
+    # 1) Liga-IDs laden
+    with open(LEAGUES_FILE_PATH, "r", encoding="utf-8") as f:
+        leagues_data = json.load(f)
 
-# Liga-IDs aus der Datei extrahieren
-with open(leagues_file_path, "r", encoding="utf-8") as f:
-    leagues_data = json.load(f)
+    league_ids = {
+        item.get("league", {}).get("id")
+        for item in leagues_data.get("response", [])
+        if item.get("league", {}).get("id") is not None
+    }
+    league_ids = list(league_ids)
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Gefundene Liga-IDs: {league_ids}")
 
-league_ids = []
-for item in leagues_data.get("response", []):
-    league_info = item.get("league", {})
-    league_id = league_info.get("id")
-    if league_id is not None:
-        league_ids.append(league_id)
+    # 2) Seasons ab 2017 bis heute
+    current_year = datetime.now().year
+    seasons = list(range(2017, current_year + 1))
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Abzufragende Seasons: {seasons}")
 
-# Duplikate entfernen (falls vorhanden)
-league_ids = list(set(league_ids))
-print(f"Gefundene Liga-IDs: {league_ids}")
+    all_teams = []
+    conn = http.client.HTTPSConnection(API_HOST)
 
-# Definiere Seasons ab 2017 bis zum aktuellen Jahr
-current_year = datetime.now().year
-seasons = list(range(2017, current_year + 1))
-print(f"Abzufragende Seasons: {seasons}")
-
-all_teams = []  # Liste zum Sammeln aller Team-Daten
-
-# Aufbau der HTTPS-Verbindung zur API
-conn = http.client.HTTPSConnection("v3.football.api-sports.io")
-headers = {
-    'x-rapidapi-host': "v3.football.api-sports.io",
-    'x-rapidapi-key': "5fa2372f2bfcbedb8ef7b85c86f0a27a"
-}
-
-# Für jede Liga und jede Season einen API-Call durchführen (ohne Pagination)
-for league_id in league_ids:
-    for season in seasons:
-        endpoint = f"/teams?league={league_id}&season={season}"
-        conn.request("GET", endpoint, headers=headers)
-        res = conn.getresponse()
-        data = res.read()
-        json_data = json.loads(data.decode("utf-8"))
-        
-        teams = json_data.get("response", [])
-        if teams:
-            print(f"Liga {league_id}, Saison {season}: {len(teams)} Teams gefunden.")
+    # 3) API-Calls pro Liga und Saison
+    for league_id in league_ids:
+        for season in seasons:
+            endpoint = f"/teams?league={league_id}&season={season}"
+            conn.request("GET", endpoint, headers=HEADERS)
+            res = conn.getresponse()
+            data = res.read()
+            body = json.loads(data.decode("utf-8"))
+            teams = body.get("response", [])
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Liga {league_id}, Saison {season}: {len(teams)} Teams")
             all_teams.extend(teams)
-        else:
-            print(f"Liga {league_id}, Saison {season}: Keine Teams gefunden.")
 
-# Entferne rekursiv die Schlüssel "logo" und "image" aus den Team-Daten
-for team in all_teams:
-    remove_keys(team, {"logo", "image"})
+    # 4) Keys "logo" und "image" entfernen
+    for team in all_teams:
+        remove_keys(team, {"logo", "image"})
 
-# Duplikate entfernen – anhand der internen Team-ID (angenommen, sie befindet sich in entry["team"]["id"])
-unique_teams = {}
-for entry in all_teams:
-    team_info = entry.get("team", {})
-    team_id = team_info.get("id")
-    if team_id is not None:
-        # Nur einmal speichern
-        if team_id not in unique_teams:
-            unique_teams[team_id] = entry
+    # 5) Duplikate anhand team["team"]["id"] eliminieren
+    unique = {}
+    for entry in all_teams:
+        team_info = entry.get("team", {})
+        tid = team_info.get("id")
+        if tid is not None and tid not in unique:
+            unique[tid] = entry
 
-# Zusammenführen der eindeutigen Teams in einem Dictionary
-output_data = {"response": list(unique_teams.values())}
+    output_data = {"response": list(unique.values())}
 
-# Speichern der Daten in einer JSON-Datei im gewünschten Pfad
-with open(output_file_path, "w", encoding="utf-8") as f:
-    json.dump(output_data, f, ensure_ascii=False, indent=4)
+    # 6) Speichern
+    os.makedirs(os.path.dirname(OUTPUT_FILE_PATH), exist_ok=True)
+    with open(OUTPUT_FILE_PATH, "w", encoding="utf-8") as f:
+        json.dump(output_data, f, ensure_ascii=False, indent=4)
 
-print(f"Alle eindeutigen Team-Daten aus allen Ligen wurden in '{output_file_path}' gespeichert.")
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Alle eindeutigen Teams gespeichert in: {OUTPUT_FILE_PATH}")
+
+
+if __name__ == "__main__":
+    sched = BlockingScheduler(timezone="Europe/Berlin")
+    # CronTrigger: Saturday, Sunday, Monday um 01:00
+    sched.add_job(
+        fetch_all_teams,
+        trigger=CronTrigger(day_of_week="sat,sun,mon", hour="1", minute="0")
+    )
+    print("Scheduler gestartet – läuft samstags, sonntags & montags um 01:00 Uhr (Europe/Berlin)")
+    sched.start()
