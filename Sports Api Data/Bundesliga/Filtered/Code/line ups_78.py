@@ -44,7 +44,7 @@ def convert_lineups_to_csv():
         return
 
     for outer in outer_list:
-        fixture_id = outer.get("parameters", {}).get("fixture") or outer.get("fixture_id")
+        MatchID = outer.get("parameters", {}).get("fixture") or outer.get("MatchID")
         lineups = outer.get("response", [])
         if not isinstance(lineups, list):
             print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Unerwartetes Format in Element: 'response' ist keine Liste: {outer}")
@@ -71,7 +71,7 @@ def convert_lineups_to_csv():
                 if not player or not all(k in player for k in ("id","name")):
                     continue
                 rows.append({
-                    "fixture_id": fixture_id,
+                    "MatchID": MatchID,
                     "team_id":    team_id,
                     "team_name":  team_name,
                     "coach_id":   coach_id,
@@ -89,7 +89,7 @@ def convert_lineups_to_csv():
                 if not player or not all(k in player for k in ("id","name")):
                     continue
                 rows.append({
-                    "fixture_id": fixture_id,
+                    "MatchID": MatchID,
                     "team_id":    team_id,
                     "team_name":  team_name,
                     "coach_id":   coach_id,
@@ -105,7 +105,7 @@ def convert_lineups_to_csv():
     if rows:
         os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
         with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
-            fieldnames = ["fixture_id","team_id","team_name","coach_id","coach_name","formation",
+            fieldnames = ["MatchID","team_id","team_name","coach_id","coach_name","formation",
                           "player_id","player_name","pos","grid","startXI"]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -115,6 +115,9 @@ def convert_lineups_to_csv():
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Keine Daten extrahiert.")
 
 if __name__ == "__main__":
+    # 1) Job direkt beim Start ausführen
+    convert_lineups_to_csv()
+    
     sched = BlockingScheduler(timezone="Europe/Berlin")
     sched.add_job(
         convert_lineups_to_csv,

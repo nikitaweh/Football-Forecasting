@@ -4,7 +4,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 # Laden der Daten
-matches = pd.read_csv('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/match_statistics_filtered_78.csv')
+match_statistics = pd.read_csv('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/match_statistics_filtered_78.csv')
 injuries = pd.read_csv('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/injuries_league_78.csv')
 weather = pd.read_csv('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/historical_weather_data_78.csv')
 teams = pd.read_csv('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Teams_78.csv')
@@ -13,7 +13,7 @@ stammdaten = pd.read_csv('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Fi
 # Beispiel-Merge: Match-Daten mit Team-Metadaten (Heim und Auswärts)
 teams_home = teams.add_suffix('_Home')
 teams_away = teams.add_suffix('_Away')
-df = (matches
+df = (match_statistics
       .merge(teams_home, left_on='HomeTeamID', right_on='TeamID_Home')
       .merge(teams_away, left_on='AwayTeamID', right_on='TeamID_Away'))
 
