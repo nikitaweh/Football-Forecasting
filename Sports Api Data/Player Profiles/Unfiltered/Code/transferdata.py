@@ -9,8 +9,8 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Konfiguration
 # ---------------------------
-INPUT_JSON  = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/players_profiles_78.json"
-OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/transferhistory_78.json"
+INPUT_JSON  = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles_78.json"
+OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/transferhistory_78.json"
 
 API_HOST    = "v3.football.api-sports.io"
 API_KEY     = "5fa2372f2bfcbedb8ef7b85c86f0a27a"

@@ -8,11 +8,11 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-BASE_DIR        = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection"
+BASE_DIR        = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
 PROFILES_FILE   = os.path.join(BASE_DIR, "players_profiles_78.json")
 SEASONS_FILE    = os.path.join(BASE_DIR, "players_activity_78.json")
 TRANSFERS_FILE  = os.path.join(BASE_DIR, "transferhistory_78.json")
-OUTPUT_CSV_FILE = os.path.join(r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection","player_information_78.csv")
+OUTPUT_CSV_FILE = os.path.join(r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Filtered/Datacollection","player_information_78.csv")
 
 # ---------------------------
 # Funktion zur Erstellung der CSV
