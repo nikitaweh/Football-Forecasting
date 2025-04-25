@@ -119,9 +119,9 @@ def collect_match_statistics():
 # ---------------------------
 # Planung: Automatische Ausführung jeden Samstag, Sonntag und Montag um 00:01 Uhr
 # ---------------------------
-schedule.every().saturday.at("00:01").do(collect_match_statistics)
-schedule.every().sunday.at("00:01").do(collect_match_statistics)
-schedule.every().monday.at("00:01").do(collect_match_statistics)
+schedule.every().saturday.at("01:00").do(collect_match_statistics)
+schedule.every().sunday.at("01:00").do(collect_match_statistics)
+schedule.every().monday.at("01:00").do(collect_match_statistics)
 
 print("Scheduler gestartet. Warte auf die nächsten Ausführungen ...")
 while True:

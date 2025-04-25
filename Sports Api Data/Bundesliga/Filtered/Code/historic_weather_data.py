@@ -4,14 +4,16 @@ import requests
 import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # ---------------------------
 # Pfade zu den Eingabe- und Ausgabedateien
 # ---------------------------
 historic_weather_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/bereinigte_datei.csv"
 stammdaten_file       = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
-city_coordinates_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates.csv"
-output_csv_file       = os.path.join(r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection", "historical_weather_data_78.csv")
+city_coordinates_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
+output_csv_file       = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/historical_weather_data_78.csv"
 
 # ---------------------------
 # OpenWeather API Key und History-Endpoint
@@ -36,10 +38,8 @@ def get_weather_offsets(match_dt):
 # Hilfsfunktion: Eine Wetter-Abfrage durchführen (History/city)
 # ---------------------------
 def fetch_weather(lat, lon, dt_local):
-    # tz-aware setzen für dt_local
     if dt_local.tzinfo is None:
         dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Berlin"))
-    # In UTC umrechnen und Timestamp ermitteln
     ts = int(dt_local.astimezone(ZoneInfo("UTC")).timestamp())
     params = {
         "lat": lat,
@@ -53,15 +53,8 @@ def fetch_weather(lat, lon, dt_local):
     resp.raise_for_status()
     data = resp.json().get("list", [])
     if not data:
-        return {
-            "Temperature (C)": None,
-            "Pressure": None,
-            "Humidity": None,
-            "Wind Speed": None,
-            "Wind Direction": None,
-            "Rain": 0,
-            "Snow": 0
-        }
+        return {"Temperature (C)": None, "Pressure": None, "Humidity": None,
+                "Wind Speed": None, "Wind Direction": None, "Rain": 0, "Snow": 0}
     rec = data[0]
     main = rec.get("main", {})
     wind = rec.get("wind", {})
@@ -74,7 +67,7 @@ def fetch_weather(lat, lon, dt_local):
         "Rain":            rec.get("rain", {}).get("1h", 0),
         "Snow":            rec.get("snow", {}).get("1h", 0)
     }
-
+  
 # ---------------------------
 # main(): Erzeugt die Basis-CSV aus lokalen historischen Wetterdaten
 # ---------------------------
@@ -141,31 +134,24 @@ def query_api_data_by_match_id():
         print("historical_weather_data.csv fehlt – bitte zuerst main() ausführen.")
         return
 
-    # 1) Bestehende CSV laden und maximale Match_ID ermitteln
     exist_df = pd.read_csv(output_csv_file, dtype={"Match_ID": int})
     max_id = exist_df['Match_ID'].max()
     print(f"Max Match_ID in CSV: {max_id}")
 
-    # 2) Stammdaten laden und DateTime kombinieren
     stam_df = pd.read_csv(stammdaten_file, dtype={"Match_ID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-
-    # 3) Nur vergangene Spiele berücksichtigen
     now = datetime.now()
     stam_df = stam_df[stam_df['DateTime'] < now]
 
-    # 4) Nur neue Match_IDs
     new_games = stam_df[stam_df['Match_ID'] > max_id]
     if new_games.empty:
         print("Keine neuen Spiele gefunden.")
         return
     print(f"Neue Spiele: {new_games['Match_ID'].tolist()}")
 
-    # 5) Merge mit Koordinaten
     coords_df = pd.read_csv(city_coordinates_file)
     merged = new_games.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
 
-    # 6) API-Abfragen durchführen
     api_rows = []
     for _, row in merged.iterrows():
         for off in get_weather_offsets(row['DateTime']):
@@ -186,7 +172,6 @@ def query_api_data_by_match_id():
                 'Snow':            w.get('Snow')
             })
 
-    # 7) Neue Daten anhängen
     if api_rows:
         new_df = pd.DataFrame(api_rows)
         new_df['DateTime'] = new_df['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
@@ -196,8 +181,13 @@ def query_api_data_by_match_id():
         print("Keine neuen API-Daten abgerufen.")
 
 # ---------------------------
-# Skriptstart
+# Scheduler Setup
 # ---------------------------
 if __name__ == "__main__":
-#    main()
-    query_api_data_by_match_id()
+    sched = BlockingScheduler(timezone="Europe/Berlin")
+    sched.add_job(
+        query_api_data_by_match_id,
+        trigger=CronTrigger(day_of_week="sat,sun,mon", hour="3", minute="0")
+    )
+    print(f"Scheduler gestartet – läuft samstags, sonntags & montags um 03:00 Uhr (Europe/Berlin)")
+    sched.start()
