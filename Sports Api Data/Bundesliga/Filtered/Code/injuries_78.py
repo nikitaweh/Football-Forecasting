@@ -39,7 +39,7 @@ def convert_injuries_to_csv():
     os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
 
     fieldnames = [
-        'fixture_id',
+        'MatchID',
         'player_id',
         'player_name',
         'team_id',
@@ -62,7 +62,7 @@ def convert_injuries_to_csv():
                 team_name = inj.get('team', {}).get('name', '')
                 team_name = team_name_overrides.get(team_name, team_name)
                 row = {
-                    'fixture_id': fid,
+                    'MatchID': fid,
                     'player_id': inj.get('player', {}).get('id'),
                     'player_name': inj.get('player', {}).get('name'),
                     'team_id': inj.get('team', {}).get('id'),
@@ -79,8 +79,11 @@ def convert_injuries_to_csv():
 
 
 if __name__ == "__main__":
+    # 1) Job direkt beim Start ausführen
+    convert_injuries_to_csv()
+
+    # 2) Scheduler aufsetzen
     sched = BlockingScheduler(timezone="Europe/Berlin")
-    # Job: Samstag, Sonntag und Montag um 03:00 Uhr
     sched.add_job(
         convert_injuries_to_csv,
         trigger=CronTrigger(day_of_week="sat,sun,mon", hour="3", minute="0")
