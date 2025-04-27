@@ -60,28 +60,22 @@ def collect_player_stats():
         existing_stats = []
         print(f"[{datetime.now()}] Keine bestehende Spielerstatistik-Datei gefunden. Es wird eine neue Liste erstellt.")
     
-    # Erstelle eine Menge mit bereits verarbeiteten Fixture-IDs
-    existing_fixture_ids = set()
-    for stats in existing_stats:
-        fid = stats.get("fixture_id")
-        if fid is not None:
-            existing_fixture_ids.add(fid)
+    existing_fixture_ids = {stats.get("fixture_id") for stats in existing_stats if stats.get("fixture_id") is not None}
 
     # ---------------------------
-    # 3) Für jede Fixture-ID individuelle Spielerstatistiken abrufen,
-    #    sofern sie noch nicht in der Output-Datei vorhanden sind.
+    # 3) Für jede Fixture-ID individuelle Spielerstatistiken abrufen
     # ---------------------------
     conn = http.client.HTTPSConnection("v3.football.api-sports.io")
     headers = {
         'x-rapidapi-host': "v3.football.api-sports.io",
-        'x-rapidapi-key': "5fa2372f2bfcbedb8ef7b85c86f0a27a"  # API-Schlüssel ggf. anpassen!
+        'x-rapidapi-key': "5fa2372f2bfcbedb8ef7b85c86f0a27a"
     }
 
     new_stats = []
     total_ids = len(fixture_ids)
     for idx, fid in enumerate(fixture_ids, start=1):
         if fid in existing_fixture_ids:
-            print(f"[{idx}/{total_ids}] Spielerstatistik für Fixture-ID {fid} existiert bereits, überspringe.")
+            print(f"[{idx}/{total_ids}] Fixture-ID {fid} bereits erfasst, überspringe.")
             continue
 
         endpoint = f"/fixtures/players?fixture={fid}"
@@ -91,42 +85,43 @@ def collect_player_stats():
         try:
             stats_json = json.loads(data.decode("utf-8"))
         except json.JSONDecodeError:
-            print(f"[{idx}/{total_ids}] Fehler beim Dekodieren der Spielerstatistik für Fixture-ID {fid}.")
+            print(f"[{idx}/{total_ids}] Fehler beim Dekodieren für Fixture-ID {fid}.")
             continue
 
-        # Entferne rekursiv die Schlüssel "logo" und "photo"
         remove_keys(stats_json, {"logo", "photo"})
-
-        # Füge zur besseren Zuordnung die Fixture-ID hinzu
         stats_json["fixture_id"] = fid
         new_stats.append(stats_json)
-        print(f"[{idx}/{total_ids}] Spielerstatistik für Fixture-ID {fid} abgerufen.")
-        time.sleep(0.15)  # Kurze Pause, um API-Limits einzuhalten
+        print(f"[{idx}/{total_ids}] Daten für Fixture-ID {fid} abgerufen.")
+        time.sleep(0.15)
 
     conn.close()
 
     if new_stats:
         existing_stats.extend(new_stats)
-        print(f"[{datetime.now()}] Es wurden {len(new_stats)} neue Spielerstatistiken hinzugefügt.")
+        print(f"[{datetime.now()}] {len(new_stats)} neue Einträge hinzugefügt.")
     else:
-        print(f"[{datetime.now()}] Für alle Fixture-IDs sind bereits Spielerstatistiken vorhanden.")
+        print(f"[{datetime.now()}] Keine neuen Daten gefunden.")
 
     # ---------------------------
-    # 4) Ergebnisse in der Output-Datei speichern
+    # 4) In Datei speichern
     # ---------------------------
     output_data = {"response": existing_stats}
     with open(output_file_path, "w", encoding="utf-8") as f:
         json.dump(output_data, f, ensure_ascii=False, indent=4)
-    print(f"[{datetime.now()}] Alle Spielerstatistiken wurden in '{output_file_path}' gespeichert.")
+    print(f"[{datetime.now()}] Fertig. Datei gespeichert: '{output_file_path}'")
 
 # ---------------------------
-# Planung: Automatische Ausführung jeden Samstag, Sonntag und Montag um 00:00 Uhr
+# Planung: Automatische Ausführung
 # ---------------------------
 schedule.every().saturday.at("01:00").do(collect_player_stats)
 schedule.every().sunday.at("01:00").do(collect_player_stats)
 schedule.every().monday.at("01:00").do(collect_player_stats)
 
+# 1) Direkt beim Start einmal ausführen
+collect_player_stats()
+
 print("Scheduler gestartet. Warte auf die nächsten Ausführungen ...")
+# 2) Scheduler-Schleife
 while True:
     schedule.run_pending()
-    time.sleep(3600)  # Jede Stunde prüfen, ob ein geplanter Job ansteht.
+    time.sleep(3600)

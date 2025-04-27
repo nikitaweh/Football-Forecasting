@@ -42,7 +42,7 @@ def convert_player_statistics_to_csv():
         return
 
     for outer in outer_list:
-        fixture_id = outer.get('parameters', {}).get('fixture') or outer.get('fixture_id')
+        MatchID = outer.get('parameters', {}).get('fixture') or outer.get('fixture_id')
         responses = outer.get('response', [])
         if not isinstance(responses, list):
             continue
@@ -108,7 +108,7 @@ def convert_player_statistics_to_csv():
                 distance = stats.get('distance')
 
                 rows.append({
-                    'Fixture ID': fixture_id,
+                    'MatchID': MatchID,
                     'Team ID': team_id,
                     'Team Name': team_name,
                     'Player ID': player.get('id'),
@@ -156,6 +156,9 @@ def convert_player_statistics_to_csv():
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Keine Daten extrahiert.")
 
 if __name__ == "__main__":
+
+    convert_player_statistics_to_csv()
+
     sched = BlockingScheduler(timezone="Europe/Berlin")
     # CronTrigger: Samstag, Sonntag, Montag um 03:00 Uhr
     sched.add_job(

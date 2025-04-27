@@ -47,10 +47,10 @@ def convert_stammdaten_to_csv():
         teams_data = fixture.get("teams", {})
         venue_data = fixture_data.get("venue", {})
 
-        match_id  = fixture_data.get("id")
-        league_id = league_data.get("id")
-        season    = league_data.get("season")
-        matchday  = league_data.get("round")
+        MatchID     = fixture_data.get("id")
+        league_id   = league_data.get("id")
+        season      = league_data.get("season")
+        matchday    = league_data.get("round")
 
         date_time_str = fixture_data.get("date", "")
         try:
@@ -58,37 +58,37 @@ def convert_stammdaten_to_csv():
             dt_local  = dt_utc.astimezone(berlin_tz)
             date_part = dt_local.date().isoformat()
             time_part = dt_local.time().isoformat(timespec="seconds")
-        except:
+        except Exception:
             date_part = ""
             time_part = ""
 
-        raw_home = teams_data.get("home", {}).get("name", "")
-        raw_away = teams_data.get("away", {}).get("name", "")
-        home_team = team_name_overrides.get(raw_home, raw_home)
-        away_team = team_name_overrides.get(raw_away, raw_away)
-        home_team_id = teams_data.get("home", {}).get("id")
-        away_team_id = teams_data.get("away", {}).get("id")
+        raw_home      = teams_data.get("home", {}).get("name", "")
+        raw_away      = teams_data.get("away", {}).get("name", "")
+        home_team     = team_name_overrides.get(raw_home, raw_home)
+        away_team     = team_name_overrides.get(raw_away, raw_away)
+        home_team_id  = teams_data.get("home", {}).get("id")
+        away_team_id  = teams_data.get("away", {}).get("id")
 
         stadium = venue_data.get("name")
         referee = fixture_data.get("referee")
 
         rows.append({
-            "Match_ID": match_id,
-            "League_ID": league_id,
-            "Season": season,
-            "Matchday": matchday,
-            "Date": date_part,
-            "Time": time_part,
-            "Home Team": home_team,
-            "Away Team": away_team,
-            "Home Team ID": home_team_id,
-            "Away Team ID": away_team_id,
-            "Stadion": stadium,
-            "Referee": referee
+            "MatchID":        MatchID,
+            "League_ID":      league_id,
+            "Season":         season,
+            "Matchday":       matchday,
+            "Date":           date_part,
+            "Time":           time_part,
+            "Home Team":      home_team,
+            "Away Team":      away_team,
+            "Home Team ID":   home_team_id,
+            "Away Team ID":   away_team_id,
+            "Stadion":        stadium,
+            "Referee":        referee
         })
 
     fieldnames = [
-        "Match_ID", "League_ID", "Season", "Matchday",
+        "MatchID", "League_ID", "Season", "Matchday",
         "Date", "Time", "Home Team", "Away Team",
         "Home Team ID", "Away Team ID", "Stadion", "Referee"
     ]
@@ -106,8 +106,11 @@ def convert_stammdaten_to_csv():
 # Scheduler Setup
 # ---------------------------
 if __name__ == "__main__":
+    # 1) Direkt beim Start einmal ausführen
+    convert_stammdaten_to_csv()
+
+    # 2) Scheduler starten
     sched = BlockingScheduler(timezone="Europe/Berlin")
-    # CronTrigger: Samstag, Sonntag, Montag um 02:00 Uhr
     sched.add_job(
         convert_stammdaten_to_csv,
         trigger=CronTrigger(day_of_week="sat,sun,mon", hour="2", minute="0")
