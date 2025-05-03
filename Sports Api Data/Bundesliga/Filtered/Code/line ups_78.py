@@ -46,74 +46,85 @@ def convert_lineups_to_csv():
     for outer in outer_list:
         MatchID = outer.get("parameters", {}).get("fixture") or outer.get("MatchID")
         lineups = outer.get("response", [])
-        if not isinstance(lineups, list):
-            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Unerwartetes Format in Element: 'response' ist keine Liste: {outer}")
+        if not isinstance(lineups, list) or len(lineups) < 2:
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Weniger als zwei Teams für Match {MatchID}, übersprungen.")
             continue
 
-        for entry in lineups:
-            team  = entry.get("team")
-            coach = entry.get("coach")
+        # Home/Away per Index
+        home_entry = lineups[0]
+        away_entry = lineups[1]
+
+        # Hilfsfunktion, um die Zeilen zu bauen
+        def add_player_rows(entry, is_start, side):
+            team      = entry.get("team", {})
+            coach     = entry.get("coach", {})
             formation = entry.get("formation", "")
-            if not team or not coach:
-                continue
-            if not all(k in team for k in ("id","name")) or not all(k in coach for k in ("id","name")):
-                continue
+            if not team or not coach or "id" not in team or "id" not in coach:
+                return []
 
-            team_id   = team["id"]
-            raw_name  = team["name"]
-            team_name = team_name_overrides.get(raw_name, raw_name)
-            coach_id  = coach["id"]
-            coach_name= coach["name"]
+            team_id    = team["id"]
+            raw_name   = team["name"]
+            team_name  = team_name_overrides.get(raw_name, raw_name)
+            coach_id   = coach["id"]
+            coach_name = coach["name"]
 
-            # Startelf
-            for player_entry in entry.get("startXI", []):
-                player = player_entry.get("player")
-                if not player or not all(k in player for k in ("id","name")):
+            # hier entscheiden wir, welche Spalte gefüllt wird
+            home_id = team_id if side == "home" else ""
+            away_id = team_id if side == "away" else ""
+
+            out = []
+            players = entry.get("startXI", []) if is_start else entry.get("substitutes", [])
+            for p in players:
+                pl = p.get("player", {})
+                if not pl or "id" not in pl or "name" not in pl:
                     continue
-                rows.append({
-                    "MatchID": MatchID,
-                    "team_id":    team_id,
-                    "team_name":  team_name,
-                    "coach_id":   coach_id,
-                    "coach_name": coach_name,
-                    "formation":  formation,
-                    "player_id":  player["id"],
-                    "player_name":player["name"],
-                    "pos":         player.get("pos", ""),
-                    "grid":        player.get("grid", ""),
-                    "startXI":     True
+                out.append({
+                    "MatchID":       MatchID,
+                    "Home Team ID":  home_id,
+                    "Away Team ID":  away_id,
+                    "Team Name":     team_name,
+                    "Coach ID":      coach_id,
+                    "Coach Name":    coach_name,
+                    "Formation":     formation,
+                    "Player ID":     pl["id"],
+                    "Player Name":   pl["name"],
+                    "Pos":           p.get("pos", ""),
+                    "Grid":          p.get("grid", ""),
+                    "StartXI":       is_start
                 })
-            # Ersatzspieler
-            for sub_entry in entry.get("substitutes", []):
-                player = sub_entry.get("player")
-                if not player or not all(k in player for k in ("id","name")):
-                    continue
-                rows.append({
-                    "MatchID": MatchID,
-                    "team_id":    team_id,
-                    "team_name":  team_name,
-                    "coach_id":   coach_id,
-                    "coach_name": coach_name,
-                    "formation":  formation,
-                    "player_id":  player["id"],
-                    "player_name":player["name"],
-                    "pos":         player.get("pos", ""),
-                    "grid":        player.get("grid", ""),
-                    "startXI":     False
-                })
+            return out
 
+        # Startelf und Ersatz, jeweils mit Side-Angabe
+        rows += add_player_rows(home_entry, True,  "home")
+        rows += add_player_rows(away_entry, True,  "away")
+        rows += add_player_rows(home_entry, False, "home")
+        rows += add_player_rows(away_entry, False, "away")
+
+    # CSV schreiben
     if rows:
         os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
         with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
-            fieldnames = ["MatchID","team_id","team_name","coach_id","coach_name","formation",
-                          "player_id","player_name","pos","grid","startXI"]
+            fieldnames = [
+                "MatchID",
+                "Home Team ID",
+                "Away Team ID",
+                "Team Name",
+                "Coach ID",
+                "Coach Name",
+                "Formation",
+                "Player ID",
+                "Player Name",
+                "Pos",
+                "Grid",
+                "StartXI"
+            ]
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] CSV-Datei erstellt: {OUTPUT_CSV}")
     else:
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Keine Daten extrahiert.")
-
+        
 if __name__ == "__main__":
     # 1) Job direkt beim Start ausführen
     convert_lineups_to_csv()

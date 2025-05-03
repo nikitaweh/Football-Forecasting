@@ -1,6 +1,6 @@
+#!/usr/bin/env python3
 import json
 import os
-import time
 import http.client
 from datetime import datetime, timezone
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -22,38 +22,13 @@ HEADERS    = {
 }
 
 LEAGUE_ID = 78
+START_SEASON = 2017
 
-def iso_now():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-def iso_date(dt: datetime):
-    return dt.strftime("%Y-%m-%d")
-
-def load_existing():
-    try:
-        with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        existing = data.get("response", [])
-        last_run_str = data.get("last_run")
-        if last_run_str:
-            # parse ISO Zulu timestamp
-            lr = datetime.fromisoformat(last_run_str.replace("Z", "+00:00"))
-        else:
-            lr = None
-        return existing, lr
-    except FileNotFoundError:
-        return [], None
-
-def save_all(existing, last_run):
-    out = {
-        "last_run": last_run,
-        "response": existing
-    }
-    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=4)
 
 def remove_keys(obj, keys_to_remove):
+    """
+    Entfernt rekursiv alle angegebenen Schlüssel aus dicts und nested Strukturen.
+    """
     if isinstance(obj, dict):
         for k in list(obj.keys()):
             if k in keys_to_remove:
@@ -64,62 +39,104 @@ def remove_keys(obj, keys_to_remove):
         for item in obj:
             remove_keys(item, keys_to_remove)
 
-def fetch_new_fixtures():
-    # 1) Bestehende Daten und letzten Lauf laden
-    existing, last_run = load_existing()
-    existing_ids = {fix["fixture"]["id"] for fix in existing if "fixture" in fix and "id" in fix["fixture"]}
 
-    now = datetime.now(timezone.utc)
-    # Wenn nie gelaufen, hole alle Fixtures seit 2017-01-01
-    if last_run is None:
-        from_date = "2017-01-01"
-    else:
-        # nur Tag teilen, damit auch spätere Uhrzeiten erfasst werden
-        from_date = iso_date(last_run)
-    to_date = iso_date(now)
-
-    print(f"[{now.isoformat()}] Letzter Lauf: {last_run}, hole neue Fixtures von {from_date} bis {to_date}")
-
-    # 2) API-Call mit Datumsfilter
+def fetch_fixtures_by_season(season):
+    """
+    Ruft alle Fixtures einer Liga für eine gegebene Saison ab und entfernt logo/flag.
+    """
+    print(f"Starte Abruf Saison {season}...")
     conn = http.client.HTTPSConnection(API_HOST)
-    endpoint = f"/fixtures?league={LEAGUE_ID}&from={from_date}&to={to_date}"
+    endpoint = f"/fixtures?league={LEAGUE_ID}&season={season}"
     conn.request("GET", endpoint, headers=HEADERS)
     res = conn.getresponse()
     raw = res.read().decode("utf-8")
     conn.close()
 
     try:
-        body = json.loads(raw)
-        fixtures = body.get("response", [])
+        data = json.loads(raw)
+        fixtures = data.get("response", [])
+        # Entferne ungewünschte Keys aus jeder Fixture
+        for f in fixtures:
+            remove_keys(f, {"logo", "flag"})
+        return fixtures
     except json.JSONDecodeError:
-        print(f"Ungültiges JSON erhalten, Abbruch.")
-        return
+        print(f"Saison {season}: Ungültiges JSON, überspringe.")
+        return []
 
-    # 3) Filtere nur die wirklich neuen Fixtures
-    new = []
-    for fixture in fixtures:
-        fid = fixture.get("fixture", {}).get("id")
-        if fid is not None and fid not in existing_ids:
-            remove_keys(fixture, {"logo", "flag"})
-            new.append(fixture)
-            existing_ids.add(fid)
 
-    if new:
-        print(f"[{datetime.now().isoformat()}] {len(new)} neue Fixtures gefunden.")
-        existing.extend(new)
+def save_all(fixtures):
+    """
+    Speichert alle Fixtures als Liste unter dem last_run Zeitstempel.
+    """
+    out = {
+        "last_run": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "response": fixtures
+    }
+    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=4)
+    print(f"Gespeichert: {len(fixtures)} Spiele.")
+
+
+def fetch_full_fixtures():
+    """
+    Holt alle Spiele seit Saison START_SEASON über Saison-Parameter.
+    """
+    current_year = datetime.now(timezone.utc).year
+    seasons = list(range(START_SEASON, current_year + 1))
+    all_fixtures = []
+    seen_ids = set()
+
+    for season in seasons:
+        fixtures = fetch_fixtures_by_season(season)
+        for f in fixtures:
+            fid = f.get("fixture", {}).get("id")
+            if fid and fid not in seen_ids:
+                seen_ids.add(fid)
+                all_fixtures.append(f)
+
+    save_all(all_fixtures)
+
+
+def fetch_new_fixtures():
+    """
+    Holt nur neue Spiele basierend auf vorhandener Datei.
+    """
+    try:
+        with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        existing = data.get("response", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        existing = []
+
+    seen_ids = {fix.get("fixture", {}).get("id") for fix in existing if fix.get("fixture", {}).get("id")}
+    new_fixtures = []
+
+    current_season = datetime.now(timezone.utc).year
+    fixtures = fetch_fixtures_by_season(current_season)
+    for f in fixtures:
+        fid = f.get("fixture", {}).get("id")
+        if fid and fid not in seen_ids:
+            seen_ids.add(fid)
+            new_fixtures.append(f)
+
+    if new_fixtures:
+        combined = existing + new_fixtures
+        save_all(combined)
+        print(f"{len(new_fixtures)} neue Spiele hinzugefügt.")
     else:
-        print(f"[{datetime.now().isoformat()}] Keine neuen Fixtures seit {from_date}.")
+        print("Keine neuen Spiele.")
 
-    # 4) Speichern und letzten Lauf aktualisieren
-    save_all(existing, iso_now())
-    print(f"[{datetime.now().isoformat()}] Datei aktualisiert: {OUTPUT_FILE}")
 
 if __name__ == "__main__":
+    # Vollständiger Abruf aller Saison-Daten beim Start
+    fetch_full_fixtures()
+
+    # Scheduler: nur aktuelle Saison regelmäßig aktualisieren
     sched = BlockingScheduler(timezone="Europe/Berlin")
-    # CronTrigger: Samstag, Sonntag und Montag um 00:00 Uhr
     sched.add_job(
         fetch_new_fixtures,
         trigger=CronTrigger(day_of_week="sat,sun,mon", hour="0", minute="0")
     )
-    print(f"[{datetime.now().isoformat()}] Scheduler gestartet – läuft samstags, sonntags & montags um 00:00 Uhr (Europe/Berlin)")
+    print("Scheduler gestartet für wöchentliche Delta-Aktualisierungen.")
     sched.start()

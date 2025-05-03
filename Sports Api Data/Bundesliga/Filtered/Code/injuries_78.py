@@ -40,15 +40,13 @@ def convert_injuries_to_csv():
 
     fieldnames = [
         'MatchID',
-        'player_id',
-        'player_name',
-        'team_id',
-        'team_name',
-        'league_id',
-        'league_name',
-        'injury_type',
-        'injury_detail',
-        'injury_time'
+        'Player ID',
+        'Player Name',
+        'Team ID',
+        'Team Name',
+        'League ID',
+        'League Name',
+        'Injury Type',    # jetzt aus player.reason
     ]
 
     with open(OUTPUT_CSV, 'w', encoding='utf-8', newline='') as csvfile:
@@ -61,17 +59,20 @@ def convert_injuries_to_csv():
             for inj in entries:
                 team_name = inj.get('team', {}).get('name', '')
                 team_name = team_name_overrides.get(team_name, team_name)
+
+                player = inj.get('player', {})
+                # jetzt holen wir reason und type direkt aus dem player-Objekt
+                injury_reason = player.get('reason')
+
                 row = {
-                    'MatchID': fid,
-                    'player_id': inj.get('player', {}).get('id'),
-                    'player_name': inj.get('player', {}).get('name'),
-                    'team_id': inj.get('team', {}).get('id'),
-                    'team_name': team_name,
-                    'league_id': inj.get('league', {}).get('id'),
-                    'league_name': inj.get('league', {}).get('name'),
-                    'injury_type': inj.get('injury', {}).get('type'),
-                    'injury_detail': inj.get('injury', {}).get('detail'),
-                    'injury_time': inj.get('injury', {}).get('time')
+                    'MatchID':       fid,
+                    'Player ID':     player.get('id'),
+                    'Player Name':   player.get('name'),
+                    'Team ID':       inj.get('team', {}).get('id'),
+                    'Team Name':     team_name,
+                    'League ID':     inj.get('league', {}).get('id'),
+                    'League Name':   inj.get('league', {}).get('name'),
+                    'Injury Type':   injury_reason,
                 }
                 writer.writerow(row)
 
