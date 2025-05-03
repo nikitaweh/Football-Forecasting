@@ -76,11 +76,9 @@ def main():
     # 1) Lokale historische Wetterdaten einlesen
     weather_df = pd.read_csv(historic_weather_file)
 
-    # 2) Stammdaten einlesen, TeamID umbenennen und DateTime kombinieren
-    stam_df = pd.read_csv(stammdaten_file, dtype={"Match_ID": int})
-    # Hier Spaltennamen anpassen, falls anders
+    # 2) Stammdaten einlesen und DateTime kombinieren
+    stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    # Spiele vor dem 4. Januar 2025 ausschließen
     stam_df = stam_df[stam_df['DateTime'] < pd.Timestamp("2025-01-04")]
 
     # 3) Aufbereitung der lokalen Wetterdaten
@@ -114,13 +112,13 @@ def main():
         how='left'
     )
 
-    # 7) Auswahl und Speicherung – hier auch die neue Spalte team_id
-    out = final[['MatchID','team_id','Home Team','City','Weather_Request_Time',
+    # 7) Auswahl und Speicherung
+    out = final[['MatchID','Home Team ID','Home Team','City','Weather_Request_Time',
                  'Temperature (C)','Pressure','Humidity',
                  'Wind Speed','Wind Direction','Rain','Snow']]
     out = out.rename(columns={'Weather_Request_Time':'DateTime'})
     out['DateTime'] = out['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
-    out = out.drop_duplicates(subset=['MatchID','team_id','Home Team','City','DateTime'])
+    out = out.drop_duplicates(subset=['MatchID','Home Team ID','Home Team','City','DateTime'])
 
     os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
     out.to_csv(output_csv_file, index=False)
@@ -140,8 +138,7 @@ def query_api_data_by_match_id():
 
     stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    now = datetime.now()
-    stam_df = stam_df[stam_df['DateTime'] < now]
+    stam_df = stam_df[stam_df['DateTime'] < datetime.now()]
 
     new_games = stam_df[stam_df['MatchID'] > max_id]
     if new_games.empty:
@@ -160,7 +157,7 @@ def query_api_data_by_match_id():
             w = fetch_weather(row['Latitude'], row['Longitude'], dt_req)
             api_rows.append({
                 'MatchID':      row['MatchID'],
-                'Home Team ID':        row['Home Team ID'],
+                'Home Team ID':     row['Home Team ID'],
                 'Home Team':     row['Home Team'],
                 'City':          row['City'],
                 'DateTime':      dt_req,
@@ -185,9 +182,11 @@ def query_api_data_by_match_id():
 # Scheduler Setup
 # ---------------------------
 if __name__ == "__main__":
-    # Basisdaten einmalig erzeugen, falls noch nicht geschehen
+    # 1) Kompletten Prozess einmal ausführen
     main()
+    query_api_data_by_match_id()
 
+    # 2) Dann Scheduler starten
     sched = BlockingScheduler(timezone="Europe/Berlin")
     sched.add_job(
         query_api_data_by_match_id,

@@ -40,6 +40,7 @@ def convert_stammdaten_to_csv():
     fixtures = data.get("response", [])
     rows = []
     berlin_tz = ZoneInfo("Europe/Berlin")
+    now_local = datetime.now(berlin_tz)
 
     for fixture in fixtures:
         fixture_data = fixture.get("fixture", {})
@@ -59,8 +60,14 @@ def convert_stammdaten_to_csv():
             date_part = dt_local.date().isoformat()
             time_part = dt_local.time().isoformat(timespec="seconds")
         except Exception:
+            dt_local = None
             date_part = ""
             time_part = ""
+
+        # Neue Spalte: Ob das Spiel bereits gespielt wurde
+        played = False
+        if dt_local:
+            played = dt_local < now_local
 
         raw_home      = teams_data.get("home", {}).get("name", "")
         raw_away      = teams_data.get("away", {}).get("name", "")
@@ -74,7 +81,7 @@ def convert_stammdaten_to_csv():
 
         rows.append({
             "MatchID":        MatchID,
-            "League_ID":      league_id,
+            "League ID":      league_id,
             "Season":         season,
             "Matchday":       matchday,
             "Date":           date_part,
@@ -84,13 +91,15 @@ def convert_stammdaten_to_csv():
             "Home Team ID":   home_team_id,
             "Away Team ID":   away_team_id,
             "Stadion":        stadium,
-            "Referee":        referee
+            "Referee":        referee,
+            "Gespielt":       played
         })
 
+    # Feldnamen inklusive neue Spalte
     fieldnames = [
-        "MatchID", "League_ID", "Season", "Matchday",
+        "MatchID", "League ID", "Season", "Matchday",
         "Date", "Time", "Home Team", "Away Team",
-        "Home Team ID", "Away Team ID", "Stadion", "Referee"
+        "Home Team ID", "Away Team ID", "Stadion", "Referee", "Gespielt"
     ]
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     try:
