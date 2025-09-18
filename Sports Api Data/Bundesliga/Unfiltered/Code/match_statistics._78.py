@@ -1,129 +1,134 @@
+#!/usr/bin/env python3
 import http.client
 import json
 import os
 import time
 import schedule
+import argparse
 from datetime import datetime
+
+# ---------------------------
+# Pfade anpassen
+# ---------------------------
+INPUT_FILE  = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/fixtures_league_78.json"
+OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/match_statistics_league_78.json"
+
+# ---------------------------
+# API-Konfiguration
+# ---------------------------
+API_HOST = "v3.football.api-sports.io"
+API_KEY  = "5fa2372f2bfcbedb8ef7b85c86f0a27a"
+HEADERS  = {
+    'x-rapidapi-host': API_HOST,
+    'x-rapidapi-key':  API_KEY
+}
 
 def remove_keys(obj, keys_to_remove):
     """
-    Entfernt rekursiv alle Schlüssel, die in keys_to_remove enthalten sind,
-    aus Dictionaries und Listen.
+    Entfernt rekursiv alle Schlüssel aus dicts und nested Strukturen.
     """
     if isinstance(obj, dict):
-        for key in list(obj.keys()):
-            if key in keys_to_remove:
-                del obj[key]
+        for k in list(obj.keys()):
+            if k in keys_to_remove:
+                del obj[k]
             else:
-                remove_keys(obj[key], keys_to_remove)
+                remove_keys(obj[k], keys_to_remove)
     elif isinstance(obj, list):
         for item in obj:
             remove_keys(item, keys_to_remove)
 
-def collect_match_statistics():
-    print(f"[{datetime.now()}] Starte Abruf der Match-Statistiken ...")
-    
-    # Dateipfade
-    input_file_path = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/fixtures_league_78.json"
-    output_file_path = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/match_statistics_league_78.json"
+def collect_match_statistics(full_load=False):
+    print(f"[{datetime.now()}] Starte Abruf (full_load={full_load}) ...")
 
-    # ---------------------------
-    # 1) Fixture-Daten aus der Input-Datei laden und Match-IDs extrahieren
-    # ---------------------------
+    # 1) Fixtures einlesen
     try:
-        with open(input_file_path, "r", encoding="utf-8") as f:
-            fixtures_data = json.load(f)
-        print(f"[{datetime.now()}] Fixture-Daten geladen.")
+        with open(INPUT_FILE, "r", encoding="utf-8") as f:
+            fixtures_data = json.load(f).get("response", [])
+        print(f"[{datetime.now()}] {len(fixtures_data)} Fixtures geladen.")
     except FileNotFoundError:
-        print(f"[{datetime.now()}] FEHLER: Fixture-Datei '{input_file_path}' nicht gefunden.")
+        print(f"[{datetime.now()}] Fehler: Fixture-Datei nicht gefunden")
         return
 
-    match_ids = []
-    for fixture in fixtures_data.get("response", []):
-        fixture_info = fixture.get("fixture", {})
-        match_id = fixture_info.get("id")
-        if match_id is not None:
-            match_ids.append(match_id)
-    print(f"[{datetime.now()}] Es wurden {len(match_ids)} Match-IDs gefunden.")
-
-    # ---------------------------
-    # 2) Bestehende Match-Statistiken laden (zur Vermeidung von Duplikaten)
-    # ---------------------------
-    try:
-        with open(output_file_path, "r", encoding="utf-8") as f:
-            existing_stats_data = json.load(f)
-            existing_stats = existing_stats_data.get("response", [])
-        print(f"[{datetime.now()}] Es wurden {len(existing_stats)} bestehende Match-Statistiken gefunden.")
-    except FileNotFoundError:
+    # 2) Bestehende Statistiken (nur im Inkremental-Modus)
+    if full_load:
+        if os.path.exists(OUTPUT_FILE):
+            os.remove(OUTPUT_FILE)
+            print(f"[{datetime.now()}] Alte Statistik-Datei gelöscht (Full-Load).")
         existing_stats = []
-        print(f"[{datetime.now()}] Keine bestehende Statistik-Datei gefunden. Es wird eine neue Liste erstellt.")
-
-    # Erstelle eine Menge mit den bereits erfassten Match-IDs (aus fixture_id)
-    existing_match_ids = set()
-    for stat in existing_stats:
-        fid = stat.get("fixture_id")
-        if fid is not None:
-            existing_match_ids.add(fid)
-
-    # ---------------------------
-    # 3) Für jede Match-ID werden die Statistiken abgefragt, sofern noch nicht vorhanden
-    # ---------------------------
-    conn = http.client.HTTPSConnection("v3.football.api-sports.io")
-    headers = {
-        'x-rapidapi-host': "v3.football.api-sports.io",
-        'x-rapidapi-key': "5fa2372f2bfcbedb8ef7b85c86f0a27a"
-    }
-
-    new_statistics = []
-    total_ids = len(match_ids)
-    for idx, match_id in enumerate(match_ids, start=1):
-        if match_id in existing_match_ids:
-            print(f"[{idx}/{total_ids}] Statistiken für Match-ID {match_id} existieren bereits, überspringe.")
-            continue
-
-        endpoint = f"/fixtures/statistics?fixture={match_id}"
-        conn.request("GET", endpoint, headers=headers)
-        res = conn.getresponse()
-        data = res.read()
+        existing_ids   = set()
+    else:
         try:
-            statistics_json = json.loads(data.decode("utf-8"))
-        except json.JSONDecodeError:
-            print(f"[{idx}/{total_ids}] Fehler beim Dekodieren der Statistiken für Match-ID {match_id}.")
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                existing_stats = json.load(f).get("response", [])
+            print(f"[{datetime.now()}] {len(existing_stats)} bestehende Statistiken geladen.")
+        except (FileNotFoundError, json.JSONDecodeError):
+            existing_stats = []
+            print(f"[{datetime.now()}] Keine bestehende Statistik-Datei gefunden; neue Liste erstellt.")
+        existing_ids = {stat.get("fixture_id") for stat in existing_stats if stat.get("fixture_id") is not None}
+
+    # 3) Filter: nur Finished-Spiele (status.short == "FT")
+    to_fetch = []
+    for fx in fixtures_data:
+        fixture     = fx.get("fixture", {})
+        status_short = fixture.get("status", {}).get("short")
+        mid          = fixture.get("id")
+
+        # Nur abgeschlossene Spiele und keine Duplikate
+        if status_short != "FT" or mid in existing_ids:
             continue
+        to_fetch.append(mid)
 
-        # Entferne rekursiv alle "logo"-Einträge
-        remove_keys(statistics_json, {"logo"})
+    print(f"[{datetime.now()}] {len(to_fetch)} abgeschlossene Matches zum Abruf gefunden.")
 
-        # Fixture-ID zur besseren Zuordnung hinzufügen
-        statistics_json["fixture_id"] = match_id
-        new_statistics.append(statistics_json)
-        print(f"[{idx}/{total_ids}] Statistiken für Match-ID {match_id} abgerufen.")
-        time.sleep(0.15)  # Kurze Pause zur Einhaltung der API-Limits
+    if not to_fetch:
+        print(f"[{datetime.now()}] Keine neuen Statistiken gefunden.")
+        return
 
+    # 4) Abrufen der neuen Statistiken
+    conn = http.client.HTTPSConnection(API_HOST)
+    new_stats = []
+    for idx, mid in enumerate(to_fetch, 1):
+        print(f"[{idx}/{len(to_fetch)}] Abruf für Match-ID {mid}...")
+        conn.request("GET", f"/fixtures/statistics?fixture={mid}", headers=HEADERS)
+        res = conn.getresponse()
+        raw = res.read()
+        try:
+            stat_json = json.loads(raw.decode('utf-8'))
+        except json.JSONDecodeError:
+            print(f"[{idx}/{len(to_fetch)}] JSON-Fehler für Match-ID {mid}.")
+            continue
+        remove_keys(stat_json, {"logo"})
+        stat_json["fixture_id"] = mid
+        new_stats.append(stat_json)
+        time.sleep(0.15)
     conn.close()
 
-    if new_statistics:
-        existing_stats.extend(new_statistics)
-        print(f"[{datetime.now()}] Es wurden {len(new_statistics)} neue Match-Statistiken hinzugefügt.")
-    else:
-        print(f"[{datetime.now()}] Für alle Match-IDs sind bereits Statistiken vorhanden.")
+    # 5) Speichern
+    existing_stats.extend(new_stats)
+    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        json.dump({"response": existing_stats}, f, ensure_ascii=False, indent=4)
+    print(f"[{datetime.now()}] {len(new_stats)} neue Statistiken gespeichert.")
 
-    # ---------------------------
-    # 4) Ergebnisse in der Output-Datei speichern
-    # ---------------------------
-    output_data = {"response": existing_stats}
-    with open(output_file_path, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=4)
-    print(f"[{datetime.now()}] Alle Match-Statistiken wurden in '{output_file_path}' gespeichert.")
 
-# ---------------------------
-# Planung: Automatische Ausführung jeden Samstag, Sonntag und Montag um 00:01 Uhr
-# ---------------------------
-schedule.every().saturday.at("01:00").do(collect_match_statistics)
-schedule.every().sunday.at("01:00").do(collect_match_statistics)
-schedule.every().monday.at("01:00").do(collect_match_statistics)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Match-Statistiken abrufen")
+    parser.add_argument(
+        "--full-load",
+        action="store_true",
+        help="Alle beendeten Spiele neu abfragen (alte Daten werden gelöscht)"
+    )
+    args = parser.parse_args()
 
-print("Scheduler gestartet. Warte auf die nächsten Ausführungen ...")
-while True:
-    schedule.run_pending()
-    time.sleep(60)  # Alle 60 Sekunden prüfen, ob ein geplanter Job fällig ist.
+    # Initialer Lauf: Full- oder Inkremental-Modus je nach Flag
+    collect_match_statistics(full_load=args.full_load)
+
+    # Geplante Läufe immer im Inkremental-Modus
+    schedule.every().saturday.at("01:00").do(collect_match_statistics, full_load=False)
+    schedule.every().sunday.at("01:00").do(collect_match_statistics, full_load=False)
+    schedule.every().monday.at("01:00").do(collect_match_statistics, full_load=False)
+
+    print("Scheduler läuft...")
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
