@@ -16,6 +16,27 @@ lineups       = pd.read_csv(os.path.join(DATA_PATH, 'lineups_league_78.csv'))
 teams         = pd.read_csv(os.path.join(DATA_PATH, 'Teams_78.csv'))
 player_stats  = pd.read_csv(os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv'), low_memory=False)
 
+# 1.1 Wetterdaten aggregieren auf Match-Ebene
+weather_agg = (
+    weather.groupby('MatchID').agg({
+        'Temperature (C)': 'mean',
+        'Pressure':       'mean',
+        'Humidity':       'mean',
+        'Wind Speed':     'mean',
+        'Rain':           'sum',
+        'Snow':           'sum'
+    })
+    .reset_index()
+    .rename(columns={
+        'Temperature (C)': 'AvgTempC',
+        'Pressure':       'AvgPressure',
+        'Humidity':       'AvgHumidity',
+        'Wind Speed':     'AvgWindSpeed',
+        'Rain':           'TotalRain',
+        'Snow':           'TotalSnow'
+    })
+)
+
 # 2. Spalten umbenennen
 stammdaten.rename(columns={
     'Home Team ID': 'HomeTeamID', 'Away Team ID': 'AwayTeamID',
@@ -35,7 +56,7 @@ lineups.rename(columns={
     'Player ID': 'PlayerID', 'Player Name': 'PlayerName', 'StartXI': 'StartXI'
 }, inplace=True)
 player_stats.rename(columns={
-    'Match ID': 'MatchID', 'Team ID': 'TeamID',      'Player ID': 'PlayerID',
+    'Match ID': 'MatchID', 'Team ID': 'TeamID', 'Player ID': 'PlayerID',
     'Player Name': 'PlayerName', 'Rating': 'Rating'
 }, inplace=True)
 player_stats['Rating'] = pd.to_numeric(player_stats['Rating'], errors='coerce')
@@ -45,17 +66,19 @@ teams.rename(columns={
 }, inplace=True)
 
 # 3. Zusammenführen
-# 3.1 Grunddaten
+# 3.1 Match-Statistiken + Stammdaten
 df = match_stats.merge(stammdaten, on='MatchID', how='left')
-# 3.2 Wetter
-df = df.merge(weather, on='MatchID', how='left')
+# 3.2 Aggregierte Wetterdaten
+df = df.merge(weather_agg, on='MatchID', how='left')
 # 3.3 Team-Metadaten Home/Away
 teams_home = teams.add_suffix('_Home')
-teams_away = teams.add_suffix('_Away')
-df = (df
-       .merge(teams_home, left_on='HomeTeamID', right_on='TeamID_Home', how='left')
-       .merge(teams_away, left_on='AwayTeamID', right_on='TeamID_Away', how='left'))
-# 3.4 Verletzungen
+teams_away  = teams.add_suffix('_Away')
+df = (
+    df
+    .merge(teams_home, left_on='HomeTeamID', right_on='TeamID_Home', how='left')
+    .merge(teams_away, left_on='AwayTeamID', right_on='TeamID_Away', how='left')
+)
+# 3.4 Verletzungen aggregieren
 inj_agg = injuries.groupby(['MatchID', 'TeamID']).size().unstack(fill_value=0).add_prefix('NumInjuries_')
 df = df.merge(inj_agg, on='MatchID', how='left').fillna(0)
 # 3.5 Aufstellungen Home/Away
@@ -64,24 +87,29 @@ away_lp = lineups[lineups['StartXI']].groupby(['MatchID','AwayTeamID']).size().r
 df = df.merge(home_lp[['MatchID','StartXI_Home']], on='MatchID', how='left')
 df = df.merge(away_lp[['MatchID','StartXI_Away']], on='MatchID', how='left')
 df[['StartXI_Home','StartXI_Away']] = df[['StartXI_Home','StartXI_Away']].fillna(0)
-# 3.6 Spielerstats
+# 3.6 Spielerstatistiken aggregieren
 player_agg = player_stats.groupby(['MatchID','TeamID'])['Rating'].mean().unstack(fill_value=0).add_prefix('AvgRating_')
 df = df.merge(player_agg, on='MatchID', how='left').fillna(0)
 
-# 4. Daten auf Split basierend auf 'Played'
+# 4. Datenaufteilung basierend auf 'Played'
 train_df = df[df['Played'] == True].copy()
 predict_df = df[df['Played'] == False].copy()
 
+# 4.1 Wetter-Features übernehmen
+for col in ['AvgTempC','AvgPressure','AvgHumidity','AvgWindSpeed','TotalRain','TotalSnow']:
+    train_df[col] = train_df[col]
+    predict_df[col] = predict_df[col]
+
 # 5. Ergebnis-Spalte direkt aus Stammdaten übernehmen
-#    Die Spalte 'Winner' enthält bereits 'HomeWin','AwayWin' oder 'Draw'
 train_df['Result'] = train_df['Winner']
 
-# 6. Encoding. Encoding Encoding
+# 6. Encoding
 encoder = LabelEncoder()
 train_df['ResultEnc'] = encoder.fit_transform(train_df['Result'])
 
 # 7. Train/Test Split für Trainingsdaten
-features = ['HomeGoals','AwayGoals','HomePossession','AwayPossession']
+features = ['HomeGoals','AwayGoals','HomePossession','AwayPossession',
+            'AvgTempC','AvgPressure','AvgHumidity','AvgWindSpeed','TotalRain','TotalSnow']
 X_train, X_val, y_train, y_val = train_test_split(
     train_df[features], train_df['ResultEnc'], test_size=0.2, random_state=42
 )

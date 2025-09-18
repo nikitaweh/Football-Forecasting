@@ -55,9 +55,17 @@ def fetch_fixtures_by_season(season):
     try:
         data = json.loads(raw)
         fixtures = data.get("response", [])
+
         # Entferne ungewünschte Keys aus jeder Fixture
         for f in fixtures:
             remove_keys(f, {"logo", "flag"})
+
+        # **NEU**: alle noch nicht gestarteten Spiele herausfiltern
+        fixtures = [
+            f for f in fixtures
+            if f.get("fixture", {}).get("status", {}).get("long") != "Not Started"
+        ]
+
         return fixtures
     except json.JSONDecodeError:
         print(f"Saison {season}: Ungültiges JSON, überspringe.")
