@@ -14,6 +14,7 @@ injuries      = pd.read_csv(os.path.join(DATA_PATH, 'injuries_league_78.csv'))
 lineups       = pd.read_csv(os.path.join(DATA_PATH, 'lineups_league_78.csv'))
 teams         = pd.read_csv(os.path.join(DATA_PATH, 'Teams_78.csv'))
 player_stats  = pd.read_csv(os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv'), low_memory=False)
+weather       = pd.read_csv(os.path.join(DATA_PATH, 'historical_weather_data_78.csv'))
 
 # 2. Umbenennen
 stammdaten.rename(columns={
@@ -63,6 +64,40 @@ teams.rename(columns={
 
 # 3. Zusammenführen – WICHTIG: mit STAMMDATEN starten, damit ungespielte Spiele erhalten bleiben
 df = stammdaten.merge(match_stats, on='MatchID', how='left')
+
+# Wetterdaten aggregieren (pro MatchID) und an df anhängen
+weather_cols_spec = {
+    'Temperature (C)': ('Weather_TempC_mean', 'mean'),
+    'Pressure':        ('Weather_Pressure_mean', 'mean'),
+    'Humidity':        ('Weather_Humidity_mean', 'mean'),
+    'Wind Speed':      ('Weather_WindSpeed_mean', 'mean'),
+    'Rain':            ('Weather_Rain_sum', 'sum'),
+    'Snow':            ('Weather_Snow_sum', 'sum'),
+}
+
+# nur Spalten aggregieren, die in der Datei wirklich existieren
+available_weather_cols = {
+    col: agg for col, (new_name, agg) in weather_cols_spec.items()
+    if col in weather.columns
+}
+
+if available_weather_cols:
+    weather_agg = (
+        weather
+        .groupby('MatchID')
+        .agg(available_weather_cols)
+        .reset_index()
+    )
+    rename_map = {
+        col: weather_cols_spec[col][0]
+        for col in available_weather_cols.keys()
+    }
+    weather_agg = weather_agg.rename(columns=rename_map)
+
+    # an df mergen
+    df = df.merge(weather_agg, on='MatchID', how='left')
+else:
+    print('Hinweis: Keine passenden Wetterspalten in historical_weather_data_78.csv gefunden – Wetterfeatures werden nicht angehängt.')
 
 teams_home = teams.add_suffix('_Home')
 teams_away = teams.add_suffix('_Away')
@@ -122,7 +157,14 @@ features = ['HomeGoals','AwayGoals',
             'HomeYellowCard','AwayYellowCard',
             'HomeRedCard','AwayRedCard',
             'HomeOffsides','AwayOffsides',
-            'HomeCorners','AwayCorners']
+            'HomeCorners','AwayCorners',
+            'Weather_TempC_mean',
+            'Weather_Pressure_mean',
+            'Weather_Humidity_mean',
+            'Weather_WindSpeed_mean',
+            'Weather_Rain_sum',
+            'Weather_Snow_sum']
+
 missing = [f for f in features if f not in train_df.columns]
 if missing:
     raise ValueError(f"Fehlende Feature-Spalten im Trainingsdatensatz: {missing}")

@@ -24,7 +24,7 @@ city_overrides = {
     "Eintracht Frankfurt":      "Frankfurt",
     "1. FC Heidenheim":         "Heidenheim",
     "Borussia Mönchengladbach": "Gladbach",
-    "1.FC Köln":                "Cologne",
+    "1. FC Köln":                "Cologne",
     "Hannover 96":              "Hanover",
     "1. FC Nürnberg":           "Nuremberg",
 }
