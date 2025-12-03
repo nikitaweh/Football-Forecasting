@@ -1,5 +1,6 @@
 import http.client
 import json
+from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -38,8 +39,8 @@ def fetch_bundesliga():
         "response": []
     }
     for item in json_data.get("response", []):
-        if (item.get("league",{}).get("name") == "Bundesliga" and
-            item.get("country",{}).get("name") == "Germany"):
+        if (item.get("league", {}).get("name") == "Bundesliga" and
+            item.get("country", {}).get("name") == "Germany"):
             bundesliga_data["response"].append(item)
     bundesliga_data["results"] = len(bundesliga_data["response"])
 
@@ -47,12 +48,20 @@ def fetch_bundesliga():
     output_file = "C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(bundesliga_data, f, ensure_ascii=False, indent=4)
-    print(f"[{__name__}] Daten gespeichert: {output_file}")
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Daten gespeichert: {output_file}")
 
 if __name__ == "__main__":
+    # 1) Einmaliger Direktlauf
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Starte initialen Abruf der Bundesliga-Liga-Daten ...")
+    fetch_bundesliga()
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Initialer Abruf abgeschlossen.")
+
+    # 2) Danach Scheduler starten
     sched = BlockingScheduler(timezone="Europe/Berlin")
     # Cron: TAG=1, Stunde=0, Minute=0
-    sched.add_job(fetch_bundesliga,
-                  trigger=CronTrigger(day="1", hour="0", minute="0"))
+    sched.add_job(
+        fetch_bundesliga,
+        trigger=CronTrigger(day="1", hour="0", minute="0")
+    )
     print("Scheduler gestartet – nächster Lauf am 1. des nächsten Monats um 00:00 Uhr")
     sched.start()

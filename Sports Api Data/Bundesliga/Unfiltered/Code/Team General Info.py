@@ -88,6 +88,12 @@ def fetch_all_teams():
 
 
 if __name__ == "__main__":
+    # 1) Einmaliger Direktlauf
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Starte initialen Abruf aller Teams ...")
+    fetch_all_teams()
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Initialer Abruf abgeschlossen.")
+
+    # 2) Danach Scheduler starten
     sched = BlockingScheduler(timezone="Europe/Berlin")
     # CronTrigger: Saturday, Sunday, Monday um 01:00
     sched.add_job(

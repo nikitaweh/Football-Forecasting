@@ -43,6 +43,7 @@ def remove_keys(obj, keys_to_remove):
 def fetch_fixtures_by_season(season):
     """
     Ruft alle Fixtures einer Liga für eine gegebene Saison ab und entfernt logo/flag.
+    (Ohne Filter auf 'Not Started' -> lädt auch ungespielte Spiele)
     """
     print(f"Starte Abruf Saison {season}...")
     conn = http.client.HTTPSConnection(API_HOST)
@@ -60,11 +61,8 @@ def fetch_fixtures_by_season(season):
         for f in fixtures:
             remove_keys(f, {"logo", "flag"})
 
-        # **NEU**: alle noch nicht gestarteten Spiele herausfiltern
-        fixtures = [
-            f for f in fixtures
-            if f.get("fixture", {}).get("status", {}).get("long") != "Not Started"
-        ]
+        # >>> WICHTIG: KEIN Filter mehr auf "Not Started"
+        # fixtures = [f for f in fixtures if f.get("fixture", {}).get("status", {}).get("long") != "Not Started"]
 
         return fixtures
     except json.JSONDecodeError:

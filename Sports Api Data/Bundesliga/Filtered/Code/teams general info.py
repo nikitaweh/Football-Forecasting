@@ -49,6 +49,12 @@ def convert_teams_to_csv():
 # Scheduler Setup: jährlich am 1. August um 03:00 Uhr
 # ---------------------------
 if __name__ == "__main__":
+    # 1) Einmaliger Direktlauf
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Starte initiale Konvertierung der Teams-JSON zu CSV ...")
+    convert_teams_to_csv()
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Initiale Konvertierung abgeschlossen.")
+
+    # 2) Danach Scheduler starten
     sched = BlockingScheduler(timezone="Europe/Berlin")
     sched.add_job(
         convert_teams_to_csv,
