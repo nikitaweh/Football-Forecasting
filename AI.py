@@ -1,8 +1,9 @@
+import math
 import os
 import pandas as pd
-from xgboost import XGBClassifier
+from bartpy.sklearnmodel import SklearnModel
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 
 # Pfad zum Datenordner anpassen
 DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'
@@ -14,7 +15,6 @@ injuries      = pd.read_csv(os.path.join(DATA_PATH, 'injuries_league_78.csv'))
 lineups       = pd.read_csv(os.path.join(DATA_PATH, 'lineups_league_78.csv'))
 teams         = pd.read_csv(os.path.join(DATA_PATH, 'Teams_78.csv'))
 player_stats  = pd.read_csv(os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv'), low_memory=False)
-weather       = pd.read_csv(os.path.join(DATA_PATH, 'historical_weather_data_78.csv'))
 
 # 2. Umbenennen
 stammdaten.rename(columns={
@@ -65,40 +65,6 @@ teams.rename(columns={
 # 3. Zusammenführen – WICHTIG: mit STAMMDATEN starten, damit ungespielte Spiele erhalten bleiben
 df = stammdaten.merge(match_stats, on='MatchID', how='left')
 
-# Wetterdaten aggregieren (pro MatchID) und an df anhängen
-weather_cols_spec = {
-    'Temperature (C)': ('Weather_TempC_mean', 'mean'),
-    'Pressure':        ('Weather_Pressure_mean', 'mean'),
-    'Humidity':        ('Weather_Humidity_mean', 'mean'),
-    'Wind Speed':      ('Weather_WindSpeed_mean', 'mean'),
-    'Rain':            ('Weather_Rain_sum', 'sum'),
-    'Snow':            ('Weather_Snow_sum', 'sum'),
-}
-
-# nur Spalten aggregieren, die in der Datei wirklich existieren
-available_weather_cols = {
-    col: agg for col, (new_name, agg) in weather_cols_spec.items()
-    if col in weather.columns
-}
-
-if available_weather_cols:
-    weather_agg = (
-        weather
-        .groupby('MatchID')
-        .agg(available_weather_cols)
-        .reset_index()
-    )
-    rename_map = {
-        col: weather_cols_spec[col][0]
-        for col in available_weather_cols.keys()
-    }
-    weather_agg = weather_agg.rename(columns=rename_map)
-
-    # an df mergen
-    df = df.merge(weather_agg, on='MatchID', how='left')
-else:
-    print('Hinweis: Keine passenden Wetterspalten in historical_weather_data_78.csv gefunden – Wetterfeatures werden nicht angehängt.')
-
 teams_home = teams.add_suffix('_Home')
 teams_away = teams.add_suffix('_Away')
 df = (
@@ -128,42 +94,128 @@ rating_cols = [c for c in df.columns if c.startswith('AvgRating_')]
 if rating_cols:
     df[rating_cols] = df[rating_cols].fillna(0)
 
+# Team-Form und Grundstärke (historisch + Rolling)
+df['MatchDate'] = pd.to_datetime(df['MatchDate'], errors='coerce')
+
+played_mask = df['Played'] == True
+played_df = df[played_mask].copy()
+played_df = played_df[played_df['HomeGoals'].notna() & played_df['AwayGoals'].notna()].copy()
+
+home_rows = played_df[['MatchID', 'MatchDate', 'HomeTeamID', 'HomeGoals', 'AwayGoals']].copy()
+home_rows = home_rows.rename(columns={
+    'HomeTeamID': 'TeamID',
+    'HomeGoals': 'GoalsFor',
+    'AwayGoals': 'GoalsAgainst'
+})
+home_rows['IsHome'] = 1
+
+away_rows = played_df[['MatchID', 'MatchDate', 'AwayTeamID', 'AwayGoals', 'HomeGoals']].copy()
+away_rows = away_rows.rename(columns={
+    'AwayTeamID': 'TeamID',
+    'AwayGoals': 'GoalsFor',
+    'HomeGoals': 'GoalsAgainst'
+})
+away_rows['IsHome'] = 0
+
+team_long = pd.concat([home_rows, away_rows], ignore_index=True)
+team_long['Points'] = (
+    (team_long['GoalsFor'] > team_long['GoalsAgainst']).astype(int) * 3
+    + (team_long['GoalsFor'] == team_long['GoalsAgainst']).astype(int)
+)
+
+rolling_window = 5
+team_long = team_long.sort_values(['TeamID', 'MatchDate'])
+team_long['AvgGoalsFor_L5'] = (
+    team_long.groupby('TeamID')['GoalsFor']
+    .apply(lambda s: s.shift(1).rolling(rolling_window, min_periods=1).mean())
+    .reset_index(level=0, drop=True)
+)
+team_long['AvgGoalsAgainst_L5'] = (
+    team_long.groupby('TeamID')['GoalsAgainst']
+    .apply(lambda s: s.shift(1).rolling(rolling_window, min_periods=1).mean())
+    .reset_index(level=0, drop=True)
+)
+team_long['AvgPoints_L5'] = (
+    team_long.groupby('TeamID')['Points']
+    .apply(lambda s: s.shift(1).rolling(rolling_window, min_periods=1).mean())
+    .reset_index(level=0, drop=True)
+)
+
+team_strength = team_long.groupby('TeamID').agg(
+    BaseAvgGoalsFor=('GoalsFor', 'mean'),
+    BaseAvgGoalsAgainst=('GoalsAgainst', 'mean'),
+    BaseAvgPoints=('Points', 'mean')
+)
+
+df['Home_BaseAvgGoalsFor'] = df['HomeTeamID'].map(team_strength['BaseAvgGoalsFor'])
+df['Home_BaseAvgGoalsAgainst'] = df['HomeTeamID'].map(team_strength['BaseAvgGoalsAgainst'])
+df['Home_BaseAvgPoints'] = df['HomeTeamID'].map(team_strength['BaseAvgPoints'])
+df['Away_BaseAvgGoalsFor'] = df['AwayTeamID'].map(team_strength['BaseAvgGoalsFor'])
+df['Away_BaseAvgGoalsAgainst'] = df['AwayTeamID'].map(team_strength['BaseAvgGoalsAgainst'])
+df['Away_BaseAvgPoints'] = df['AwayTeamID'].map(team_strength['BaseAvgPoints'])
+
+team_long_feats = team_long[['TeamID', 'MatchDate', 'AvgGoalsFor_L5', 'AvgGoalsAgainst_L5', 'AvgPoints_L5']].copy()
+team_long_feats = team_long_feats.sort_values(['TeamID', 'MatchDate'])
+
+def add_team_asof_features(df_src, team_id_col, prefix):
+    base = df_src[df_src['MatchDate'].notna()].copy()
+    out_frames = []
+    for team_id, grp in base.groupby(team_id_col, sort=False):
+        team_hist = team_long_feats[team_long_feats['TeamID'] == team_id]
+        if team_hist.empty:
+            temp = grp[['MatchID']].copy()
+            temp['AvgGoalsFor_L5'] = float('nan')
+            temp['AvgGoalsAgainst_L5'] = float('nan')
+            temp['AvgPoints_L5'] = float('nan')
+            out_frames.append(temp)
+            continue
+        merged = pd.merge_asof(
+            grp.sort_values('MatchDate'),
+            team_hist.sort_values('MatchDate'),
+            on='MatchDate',
+            direction='backward',
+            allow_exact_matches=True
+        )
+        out_frames.append(merged[['MatchID', 'AvgGoalsFor_L5', 'AvgGoalsAgainst_L5', 'AvgPoints_L5']])
+    out = pd.concat(out_frames, ignore_index=True)
+    out = out.rename(columns={
+        'AvgGoalsFor_L5': f'{prefix}_AvgGoalsFor_L5',
+        'AvgGoalsAgainst_L5': f'{prefix}_AvgGoalsAgainst_L5',
+        'AvgPoints_L5': f'{prefix}_AvgPoints_L5'
+    })
+    return out
+
+home_asof = add_team_asof_features(df, 'HomeTeamID', 'Home')
+df = df.merge(home_asof, on='MatchID', how='left')
+
+away_asof = add_team_asof_features(df, 'AwayTeamID', 'Away')
+df = df.merge(away_asof, on='MatchID', how='left')
+
 # 4. Split nach 'Played'
 train_df   = df[df['Played'] == True].copy()
 predict_df = df[df['Played'] == False].copy()
 
-# --- Nur die nächsten 10 ungespielten Spiele nach Datum ---
+# --- Nur die nächsten 9 ungespielten Spiele nach Datum ---
 if not predict_df.empty:
     predict_df['MatchDate'] = pd.to_datetime(predict_df['MatchDate'], errors='coerce')
-    predict_df = predict_df.sort_values('MatchDate').head(10).copy()
-    print(f"Nächste ungespielte Spiele (bis zu 10): {len(predict_df)}")
+    predict_df = predict_df.sort_values('MatchDate').head(9).copy()
+    print(f"Nächste ungespielte Spiele (bis zu 9): {len(predict_df)}")
 
-# 5. Ziel
-train_df['Result'] = train_df['Winner']
-
-# 6. Encoding
-encoder = LabelEncoder()
-train_df['ResultEnc'] = encoder.fit_transform(train_df['Result'])
-all_class_names = list(encoder.classes_)
+# 5. Ziel (numerisch)
+train_df['GoalDiff'] = train_df['HomeGoals'] - train_df['AwayGoals']
+train_df = train_df[train_df['GoalDiff'].notna()].copy()
 
 # 7. Features (Achtung: kommen aus match_stats und sind bei ungespielten oft NaN – XGBoost kann NaN handlen)
-features = ['HomeGoals','AwayGoals',
-            'HomePossession','AwayPossession', 
-            'HomeShots','AwayShots', 
-            'HomeShotsOnTarget','AwayShotsOnTarget',
-            'HomePasses','AwayPasses',
-            'HomePassAccuracy','AwayPassAccuracy',
-            'HomeFouls','AwayFouls',
-            'HomeYellowCard','AwayYellowCard',
-            'HomeRedCard','AwayRedCard',
-            'HomeOffsides','AwayOffsides',
-            'HomeCorners','AwayCorners',
-            'Weather_TempC_mean',
-            'Weather_Pressure_mean',
-            'Weather_Humidity_mean',
-            'Weather_WindSpeed_mean',
-            'Weather_Rain_sum',
-            'Weather_Snow_sum']
+features = [
+    'Home_BaseAvgGoalsFor', 'Home_BaseAvgGoalsAgainst', 'Home_BaseAvgPoints',
+    'Away_BaseAvgGoalsFor', 'Away_BaseAvgGoalsAgainst', 'Away_BaseAvgPoints',
+    'Home_AvgGoalsFor_L5', 'Home_AvgGoalsAgainst_L5', 'Home_AvgPoints_L5',
+    'Away_AvgGoalsFor_L5', 'Away_AvgGoalsAgainst_L5', 'Away_AvgPoints_L5',
+    'StartXI_Home', 'StartXI_Away'
+]
+features += inj_cols
+features += rating_cols
+
 
 missing = [f for f in features if f not in train_df.columns]
 if missing:
@@ -171,36 +223,71 @@ if missing:
 
 # 7a. Train/Test
 X_train, X_val, y_train, y_val = train_test_split(
-    train_df[features], train_df['ResultEnc'], test_size=0.2, random_state=42, stratify=train_df['ResultEnc']
+    train_df[features], train_df['GoalDiff'], test_size=0.2, random_state=42
 )
 
 # 8. Trainieren
-model = XGBClassifier(eval_metric='mlogloss', random_state=42)
-model.fit(X_train, y_train)
+imputer = SimpleImputer(strategy='median')
+X_train_imp = imputer.fit_transform(X_train)
 
-# 9. Vorhersage (nur nächste 10)
+model = SklearnModel(n_trees=50)
+model.fit(X_train_imp, y_train.values)
+
+train_preds = model.predict(X_train_imp)
+residuals = y_train.values - train_preds
+sigma = float(pd.Series(residuals).std())
+if not math.isfinite(sigma) or sigma <= 0:
+    sigma = 1.0
+
+print("GoalDiff NaNs:", train_df['GoalDiff'].isna().sum())
+print("X_train NaNs (raw):", X_train.isna().sum().sum())
+print("X_train_imp NaNs:", pd.isna(X_train_imp).sum())
+print("sigma:", sigma)
+
+
+# 9. Vorhersage (nur nächste 9)
 if predict_df.empty:
-    pred_df = pd.DataFrame(columns=['MatchID','MatchDate','HomeTeam','AwayTeam','Predicted'] + all_class_names)
+    pred_df = pd.DataFrame(columns=['MatchID','MatchDate','HomeTeam','AwayTeam','PredictedGoalDiff'])
     print("Keine ungespielten Spiele gefunden. Leere Ergebnis-Tabelle:")
-    print(pred_df.head(10))
+    print(pred_df.head(9))
 else:
     X_pred = predict_df[features]
-    probs = model.predict_proba(X_pred)
-    model_label_ids = model.classes_
-    model_class_names = encoder.inverse_transform(model_label_ids)
+    X_pred_imp = imputer.transform(X_pred)
+    preds = model.predict(X_pred_imp)
 
-    pred_df = pd.DataFrame(probs, columns=model_class_names, index=predict_df.index)
+    draw_margin = 0.5
 
-    for cls in all_class_names:
-        if cls not in pred_df.columns:
-            pred_df[cls] = 0.0
-    pred_df = pred_df[all_class_names]
+    def normal_cdf(x):
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
-    pred_df['Predicted'] = pred_df[all_class_names].idxmax(axis=1)
+    win_probs = []
+    draw_probs = []
+    lose_probs = []
+    for mu in preds:
+        if not math.isfinite(mu):
+            win_probs.append(float('nan'))
+            draw_probs.append(float('nan'))
+            lose_probs.append(float('nan'))
+            continue
+        z_hi = (draw_margin - mu) / sigma
+        z_lo = (-draw_margin - mu) / sigma
+        cdf_hi = normal_cdf(z_hi)
+        cdf_lo = normal_cdf(z_lo)
+        draw_p = max(0.0, min(1.0, cdf_hi - cdf_lo))
+        lose_p = max(0.0, min(1.0, cdf_lo))
+        win_p = max(0.0, min(1.0, 1.0 - cdf_hi))
+        win_probs.append(win_p)
+        draw_probs.append(draw_p)
+        lose_probs.append(lose_p)
+
+    pred_df = pd.DataFrame(index=predict_df.index)
+    pred_df['WinProb'] = win_probs
+    pred_df['DrawProb'] = draw_probs
+    pred_df['LoseProb'] = lose_probs
     pred_df['MatchID']   = predict_df['MatchID'].values
     pred_df['MatchDate'] = predict_df['MatchDate'].values
     pred_df['HomeTeam']  = predict_df['HomeTeam'].values
     pred_df['AwayTeam']  = predict_df['AwayTeam'].values
 
-    cols = ['MatchID','MatchDate','HomeTeam','AwayTeam','Predicted'] + all_class_names
+    cols = ['MatchID','MatchDate','HomeTeam','AwayTeam','WinProb','DrawProb','LoseProb']
     print(pred_df[cols].head(10))
