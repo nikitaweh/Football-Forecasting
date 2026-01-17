@@ -37,9 +37,29 @@ def get_weather_offsets(match_dt):
 # ---------------------------
 # Hilfsfunktion: Eine Wetter-Abfrage durchführen (History/city)
 # ---------------------------
+def _last_sunday(year, month):
+    day = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
+    while day.weekday() != 6:
+        day -= pd.Timedelta(days=1)
+    return day
+
+def _adjust_request_time(dt_local):
+    year = dt_local.year
+    tz = ZoneInfo("Europe/Berlin")
+    start = _last_sunday(year, 3).replace(
+        hour=3, minute=0, second=0, microsecond=0, tzinfo=tz
+    )
+    end = _last_sunday(year, 10).replace(
+        hour=1, minute=59, second=0, microsecond=0, tzinfo=tz
+    )
+    if start <= dt_local <= end:
+        return dt_local - pd.Timedelta(hours=2)
+    return dt_local - pd.Timedelta(hours=1)
+
 def fetch_weather(lat, lon, dt_local):
     if dt_local.tzinfo is None:
         dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Berlin"))
+    dt_local = _adjust_request_time(dt_local)
     ts = int(dt_local.astimezone(ZoneInfo("UTC")).timestamp())
     params = {
         "lat": lat,
@@ -47,7 +67,8 @@ def fetch_weather(lat, lon, dt_local):
         "type": "hour",
         "start": ts,
         "end":   ts + 3600,
-        "appid": API_KEY
+        "appid": API_KEY,
+        "units": "metric"
     }
     resp = requests.get(BASE_URL, params=params)
     resp.raise_for_status()
@@ -71,7 +92,7 @@ def fetch_weather(lat, lon, dt_local):
 # ---------------------------
 # main(): Erzeugt die Basis-CSV aus lokalen historischen Wetterdaten
 # ---------------------------
-def main():
+def main(overwrite=False):
     print("Erzeuge Basis-CSV …")
     # 1) Lokale historische Wetterdaten einlesen
     weather_df = pd.read_csv(historic_weather_file)
@@ -79,7 +100,8 @@ def main():
     # 2) Stammdaten einlesen und DateTime kombinieren
     stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    stam_df = stam_df[stam_df['DateTime'] < pd.Timestamp("2025-01-04")]
+    now = datetime.now()
+    stam_df = stam_df[stam_df['DateTime'] <= now]
 
     # 3) Aufbereitung der lokalen Wetterdaten
     weather_df['dt_iso'] = weather_df['dt_iso'].str.replace(" +0000 UTC", "", regex=False)
@@ -121,8 +143,22 @@ def main():
     out = out.drop_duplicates(subset=['MatchID','Home Team ID','Home Team','City','DateTime'])
 
     os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
-    out.to_csv(output_csv_file, index=False)
-    print("Basis-CSV erstellt:", output_csv_file)
+    if overwrite:
+        out.to_csv(output_csv_file, index=False)
+        print("Basis-CSV neu erstellt:", output_csv_file)
+    elif os.path.exists(output_csv_file):
+        exist_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
+        key_cols = ['MatchID','Home Team ID','Home Team','City','DateTime']
+        merged = out.merge(exist_df[key_cols], on=key_cols, how='left', indicator=True)
+        new_out = merged[merged['_merge'] == 'left_only'][out.columns]
+        if new_out.empty:
+            print("Keine neuen Zeilen f\xc3\xbcr die Basis-CSV.")
+        else:
+            new_out.to_csv(output_csv_file, mode='a', header=False, index=False)
+            print(f"{len(new_out)} neue Zeilen zur Basis-CSV hinzugef\xc3\xbcgt:", output_csv_file)
+    else:
+        out.to_csv(output_csv_file, index=False)
+        print("Basis-CSV erstellt:", output_csv_file)
 
 # ---------------------------
 # Aktualisierung: Neue API-Daten anhängen
@@ -133,26 +169,31 @@ def query_api_data_by_match_id():
         return
 
     exist_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
-    max_id = exist_df['MatchID'].max()
-    print(f"Max MatchID in CSV: {max_id}")
+    key_cols = ['MatchID','Home Team ID','Home Team','City','DateTime']
+    existing_keys = set(exist_df[key_cols].itertuples(index=False, name=None))
 
     stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    stam_df = stam_df[stam_df['DateTime'] < datetime.now()]
+    now = datetime.now()
+    stam_df = stam_df[stam_df['DateTime'] <= now]
 
-    new_games = stam_df[stam_df['MatchID'] > max_id]
-    if new_games.empty:
-        print("Keine neuen Spiele gefunden.")
+    if stam_df.empty:
+        print("Keine Spiele gefunden (nur bereits gestartete Spiele werden beruecksichtigt).")
         return
-    print(f"Neue Spiele: {new_games['MatchID'].tolist()}")
 
     coords_df = pd.read_csv(city_coordinates_file)
-    merged = new_games.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
+    merged = stam_df.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
 
     api_rows = []
     for _, row in merged.iterrows():
         for off in get_weather_offsets(row['DateTime']):
             dt_req = row['DateTime'] + off
+            if dt_req > now:
+                continue
+            dt_req_str = dt_req.strftime("%A %d %B,%Y,%H:%M")
+            key = (row['MatchID'], row['Home Team ID'], row['Home Team'], row['City'], dt_req_str)
+            if key in existing_keys:
+                continue
             print(f"Hole Wetterdaten für Match {row['MatchID']} um {dt_req}")
             w = fetch_weather(row['Latitude'], row['Longitude'], dt_req)
             api_rows.append({
@@ -174,23 +215,116 @@ def query_api_data_by_match_id():
         new_df = pd.DataFrame(api_rows)
         new_df['DateTime'] = new_df['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
         new_df.to_csv(output_csv_file, mode='a', header=False, index=False)
-        print(f"{len(new_df)} neue Zeilen angehängt. Neue Max MatchID: {new_df['MatchID'].max()}")
+        print(f"{len(new_df)} neue Zeilen angehaengt.")
     else:
-        print("Keine neuen API-Daten abgerufen.")
+        print("Keine neuen API-Daten abgerufen (nur vergangene Stunden werden abgefragt).")
+
+# ---------------------------
+# Aktualisierung: Letztes Jahr neu per API abrufen
+# ---------------------------
+def refresh_last_year_api_data():
+    if not os.path.exists(output_csv_file):
+        print("historical_weather_data.csv fehlt – bitte zuerst main() ausführen.")
+        return
+
+    cutoff = datetime.now() - pd.Timedelta(days=365)
+
+    # Bestehende Daten laden und letzte 365 Tage entfernen
+    exist_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
+    exist_df['DateTime'] = pd.to_datetime(
+        exist_df['DateTime'],
+        format="%A %d %B,%Y,%H:%M",
+        errors="coerce"
+    )
+    keep_df = exist_df[exist_df['DateTime'] < cutoff].copy()
+
+    # Spiele der letzten 365 Tage ermitteln
+    stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
+    stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
+    recent_games = stam_df[(stam_df['DateTime'] >= cutoff) & (stam_df['DateTime'] < datetime.now())]
+    if recent_games.empty:
+        print("Keine Spiele im letzten Jahr gefunden.")
+        keep_df.to_csv(output_csv_file, index=False)
+        return
+
+    coords_df = pd.read_csv(city_coordinates_file)
+    merged = recent_games.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
+
+    api_rows = []
+    for _, row in merged.iterrows():
+        for off in get_weather_offsets(row['DateTime']):
+            dt_req = row['DateTime'] + off
+            print(f"Hole Wetterdaten fuer Match {row['MatchID']} um {dt_req}")
+            w = fetch_weather(row['Latitude'], row['Longitude'], dt_req)
+            api_rows.append({
+                'MatchID':          row['MatchID'],
+                'Home Team ID':     row['Home Team ID'],
+                'Home Team':        row['Home Team'],
+                'City':             row['City'],
+                'DateTime':         dt_req,
+                'Temperature (C)':  w.get('Temperature (C)'),
+                'Pressure':         w.get('Pressure'),
+                'Humidity':         w.get('Humidity'),
+                'Wind Speed':       w.get('Wind Speed'),
+                'Wind Direction':   w.get('Wind Direction'),
+                'Rain':             w.get('Rain'),
+                'Snow':             w.get('Snow')
+            })
+
+    if not api_rows:
+        print("Keine API-Daten fuer das letzte Jahr abgerufen.")
+        keep_df.to_csv(output_csv_file, index=False)
+        return
+
+    new_df = pd.DataFrame(api_rows)
+    new_df['DateTime'] = new_df['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
+    keep_df['DateTime'] = keep_df['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
+
+    combined = pd.concat([keep_df, new_df], ignore_index=True)
+    combined = combined.drop_duplicates(
+        subset=['MatchID','Home Team ID','Home Team','City','DateTime']
+    )
+    combined.to_csv(output_csv_file, index=False)
+    print("Letztes Jahr per API aktualisiert:", output_csv_file)
+
+# ---------------------------
+# Scheduler helper: Run only on full hours that match current games
+# ---------------------------
+def run_if_match_hour():
+    now = datetime.now().replace(minute=0, second=0, microsecond=0)
+    stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
+    stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
+
+    run_times = set()
+    for _, row in stam_df.iterrows():
+        match_dt = row['DateTime']
+        for off in get_weather_offsets(match_dt):
+            run_times.add((match_dt + off).replace(minute=0, second=0, microsecond=0))
+
+    if now in run_times:
+        print(f"Scheduler: hit {now} - run API update.")
+        query_api_data_by_match_id()
+    else:
+        print(f"Scheduler: no match hour at {now}.")
 
 # ---------------------------
 # Scheduler Setup
 # ---------------------------
 if __name__ == "__main__":
-    # 1) Kompletten Prozess einmal ausführen
-    main()
+    # 1) Nur neue Spiele per API ergänzen
     query_api_data_by_match_id()
 
-    # 2) Dann Scheduler starten
-    sched = BlockingScheduler(timezone="Europe/Berlin")
-    sched.add_job(
-        query_api_data_by_match_id,
-        trigger=CronTrigger(day_of_week="sat,sun,mon", hour="3", minute="0")
-    )
-    print("Scheduler gestartet – läuft samstags, sonntags & montags um 03:00 Uhr (Europe/Berlin)")
-    sched.start()
+    # 2) Scheduler nur starten, wenn explizit aktiviert
+    enable_scheduler = True
+    if enable_scheduler:
+        sched = BlockingScheduler(timezone="Europe/Berlin")
+        sched.add_job(
+            run_if_match_hour,
+            trigger=CronTrigger(minute="0")
+        )
+        print("Scheduler gestartet - prueft jede volle Stunde (Europe/Berlin)")
+        sched.start()
+
+def new_df():
+    new_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
+    print(new_df.tail(10))
