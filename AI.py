@@ -1,5 +1,6 @@
 import math
 import os
+import random
 import pandas as pd
 from bartpy.sklearnmodel import SklearnModel
 from sklearn.impute import SimpleImputer
@@ -7,6 +8,10 @@ from sklearn.model_selection import train_test_split
 
 # Pfad zum Datenordner anpassen
 DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'
+RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
+PREDICTION_OUT_PATH = os.path.join(DATA_PATH, 'prediction_weight_runs.csv')
+RUN_SUMMARY_OUT_PATH = os.path.join(DATA_PATH, 'prediction_weight_run_summary.csv')
+MAX_RUNS = 500
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
@@ -221,6 +226,38 @@ missing = [f for f in features if f not in train_df.columns]
 if missing:
     raise ValueError(f"Fehlende Feature-Spalten im Trainingsdatensatz: {missing}")
 
+def load_reference_results(path):
+    if not os.path.exists(path):
+        return None
+    try:
+        ref = pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return None
+    if not {'MatchID', 'HomeGoals', 'AwayGoals'}.issubset(ref.columns):
+        try:
+            ref = pd.read_csv(
+                path,
+                header=None,
+                names=['MatchID', 'HomeGoals', 'AwayGoals', 'Result'],
+                usecols=[0, 1, 2, 3]
+            )
+        except pd.errors.EmptyDataError:
+            return None
+    required = {'MatchID', 'HomeGoals', 'AwayGoals'}
+    if not required.issubset(ref.columns):
+        raise ValueError(f"Reference file missing columns: {sorted(required - set(ref.columns))}")
+    ref = ref.copy()
+    ref['HomeGoals'] = pd.to_numeric(ref['HomeGoals'], errors='coerce')
+    ref['AwayGoals'] = pd.to_numeric(ref['AwayGoals'], errors='coerce')
+    ref = ref.dropna(subset=['MatchID', 'HomeGoals', 'AwayGoals'])
+    if 'Result' not in ref.columns:
+        ref['Result'] = ref.apply(
+            lambda r: 'H' if r['HomeGoals'] > r['AwayGoals']
+            else ('A' if r['HomeGoals'] < r['AwayGoals'] else 'D'),
+            axis=1
+        )
+    return ref.set_index('MatchID')
+
 # 7a. Train/Test
 X_train, X_val, y_train, y_val = train_test_split(
     train_df[features], train_df['GoalDiff'], test_size=0.2, random_state=42
@@ -230,22 +267,17 @@ X_train, X_val, y_train, y_val = train_test_split(
 imputer = SimpleImputer(strategy='median')
 X_train_imp = imputer.fit_transform(X_train)
 
-model = SklearnModel(n_trees=50)
-model.fit(X_train_imp, y_train.values)
-
-train_preds = model.predict(X_train_imp)
-residuals = y_train.values - train_preds
-sigma = float(pd.Series(residuals).std())
-if not math.isfinite(sigma) or sigma <= 0:
-    sigma = 1.0
+ref_results = load_reference_results(RESULTS_PATH)
+run_limit = MAX_RUNS if ref_results is not None else 1
 
 print("GoalDiff NaNs:", train_df['GoalDiff'].isna().sum())
 print("X_train NaNs (raw):", X_train.isna().sum().sum())
 print("X_train_imp NaNs:", pd.isna(X_train_imp).sum())
-print("sigma:", sigma)
+if ref_results is None:
+    print(f"Reference results not found at {RESULTS_PATH}; running only 1 weight set.")
 
 
-# 9. Vorhersage (nur nächste 9)
+# 9. Vorhersage (nur naechste 9)
 if predict_df.empty:
     pred_df = pd.DataFrame(columns=['MatchID','MatchDate','HomeTeam','AwayTeam','PredictedGoalDiff'])
     print("Keine ungespielten Spiele gefunden. Leere Ergebnis-Tabelle:")
@@ -253,41 +285,141 @@ if predict_df.empty:
 else:
     X_pred = predict_df[features]
     X_pred_imp = imputer.transform(X_pred)
-    preds = model.predict(X_pred_imp)
 
     draw_margin = 0.5
 
     def normal_cdf(x):
         return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
-    win_probs = []
-    draw_probs = []
-    lose_probs = []
-    for mu in preds:
-        if not math.isfinite(mu):
-            win_probs.append(float('nan'))
-            draw_probs.append(float('nan'))
-            lose_probs.append(float('nan'))
-            continue
-        z_hi = (draw_margin - mu) / sigma
-        z_lo = (-draw_margin - mu) / sigma
-        cdf_hi = normal_cdf(z_hi)
-        cdf_lo = normal_cdf(z_lo)
-        draw_p = max(0.0, min(1.0, cdf_hi - cdf_lo))
-        lose_p = max(0.0, min(1.0, cdf_lo))
-        win_p = max(0.0, min(1.0, 1.0 - cdf_hi))
-        win_probs.append(win_p)
-        draw_probs.append(draw_p)
-        lose_probs.append(lose_p)
+    def outcome_from_row(row):
+        if row['HomeGoals'] > row['AwayGoals']:
+            return 'H'
+        if row['HomeGoals'] < row['AwayGoals']:
+            return 'A'
+        return 'D'
 
-    pred_df = pd.DataFrame(index=predict_df.index)
-    pred_df['WinProb'] = win_probs
-    pred_df['DrawProb'] = draw_probs
-    pred_df['LoseProb'] = lose_probs
-    pred_df['MatchID']   = predict_df['MatchID'].values
-    pred_df['MatchDate'] = predict_df['MatchDate'].values
-    pred_df['HomeTeam']  = predict_df['HomeTeam'].values
-    pred_df['AwayTeam']  = predict_df['AwayTeam'].values
+    all_runs = []
+    run_metrics = []
+    best_score = None
+    best_run = None
 
-    cols = ['MatchID','MatchDate','HomeTeam','AwayTeam','WinProb','DrawProb','LoseProb']
-    print(pred_df[cols].head(10))
+    for run_id in range(1, run_limit + 1):
+        weights = {f: random.random() * 2.0 for f in features}
+        weight_vec = pd.Series(weights, index=features).values
+
+        X_train_w = X_train_imp * weight_vec
+        model = SklearnModel(n_trees=50)
+        model.fit(X_train_w, y_train.values)
+
+        train_preds = model.predict(X_train_w)
+        residuals = y_train.values - train_preds
+        sigma = float(pd.Series(residuals).std())
+        if not math.isfinite(sigma) or sigma <= 0:
+            sigma = 1.0
+
+        X_pred_w = X_pred_imp * weight_vec
+        preds = model.predict(X_pred_w)
+
+        win_probs = []
+        draw_probs = []
+        lose_probs = []
+        for mu in preds:
+            if not math.isfinite(mu):
+                win_probs.append(float('nan'))
+                draw_probs.append(float('nan'))
+                lose_probs.append(float('nan'))
+                continue
+            z_hi = (draw_margin - mu) / sigma
+            z_lo = (-draw_margin - mu) / sigma
+            cdf_hi = normal_cdf(z_hi)
+            cdf_lo = normal_cdf(z_lo)
+            draw_p = max(0.0, min(1.0, cdf_hi - cdf_lo))
+            lose_p = max(0.0, min(1.0, cdf_lo))
+            win_p = max(0.0, min(1.0, 1.0 - cdf_hi))
+            win_probs.append(win_p)
+            draw_probs.append(draw_p)
+            lose_probs.append(lose_p)
+
+        pred_df = pd.DataFrame(index=predict_df.index)
+        pred_df['RunID'] = run_id
+        pred_df['WinProb'] = win_probs
+        pred_df['DrawProb'] = draw_probs
+        pred_df['LoseProb'] = lose_probs
+        pred_df['MatchID']   = predict_df['MatchID'].values
+        pred_df['MatchDate'] = predict_df['MatchDate'].values
+        pred_df['HomeTeam']  = predict_df['HomeTeam'].values
+        pred_df['AwayTeam']  = predict_df['AwayTeam'].values
+
+        for feat in features:
+            pred_df[f'Weight_{feat}'] = weights[feat]
+
+        run_score = None
+        run_accuracy = None
+        run_count = 0
+        if ref_results is not None:
+            merged = pred_df.merge(
+                ref_results[['HomeGoals', 'AwayGoals', 'Result']],
+                left_on='MatchID',
+                right_index=True,
+                how='left'
+            )
+            merged['ActualResult'] = merged.apply(
+                lambda r: outcome_from_row(r) if pd.notna(r['HomeGoals']) else float('nan'),
+                axis=1
+            )
+
+            def prob_for_actual(row):
+                if row['ActualResult'] == 'H':
+                    return row['WinProb']
+                if row['ActualResult'] == 'D':
+                    return row['DrawProb']
+                if row['ActualResult'] == 'A':
+                    return row['LoseProb']
+                return float('nan')
+
+            merged['ProbActual'] = merged.apply(prob_for_actual, axis=1)
+            merged['ProbActual'] = merged['ProbActual'].clip(lower=1e-12)
+            valid_probs = merged['ProbActual'].dropna()
+            if not valid_probs.empty:
+                run_score = float((-valid_probs.apply(math.log)).mean())
+            pred_df = merged
+
+            actual_rows = merged['ActualResult'].dropna()
+            if not actual_rows.empty:
+                predicted = merged[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
+                predicted = predicted.map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
+                correct_mask = (predicted[actual_rows.index] == actual_rows)
+                run_accuracy = float(correct_mask.mean())
+                run_count = int(correct_mask.count())
+                all_correct = correct_mask.all()
+                if all_correct:
+                    best_run = run_id
+                    best_score = run_score
+                    all_runs.append(pred_df)
+                    break
+
+        if run_score is not None:
+            if best_score is None or run_score < best_score:
+                best_score = run_score
+                best_run = run_id
+
+        run_metrics.append({
+            'RunID': run_id,
+            'AvgNLL': run_score,
+            'Accuracy': run_accuracy,
+            'NumMatchesScored': run_count
+        })
+        all_runs.append(pred_df)
+
+    all_pred_df = pd.concat(all_runs, ignore_index=True)
+    all_pred_df.to_csv(PREDICTION_OUT_PATH, index=False)
+
+    cols = ['RunID','MatchID','MatchDate','HomeTeam','AwayTeam','WinProb','DrawProb','LoseProb']
+    print(all_pred_df[cols].head(10))
+    if best_run is not None:
+        print(f"Best run: {best_run} (avg NLL={best_score:.6f})")
+    if ref_results is not None and run_metrics:
+        summary_df = pd.DataFrame(run_metrics)
+        summary_df = summary_df.sort_values(['AvgNLL', 'Accuracy'], ascending=[True, False])
+        summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
+        print(summary_df.head(5))
