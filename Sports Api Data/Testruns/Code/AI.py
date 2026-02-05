@@ -11,7 +11,7 @@ DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datac
 RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
 PREDICTION_OUT_PATH = os.path.join(DATA_PATH, 'prediction_weight_runs.csv')
 RUN_SUMMARY_OUT_PATH = os.path.join(DATA_PATH, 'prediction_weight_run_summary.csv')
-MAX_RUNS = 500
+MAX_RUNS = 20
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
