@@ -8,18 +8,22 @@ from sklearn.model_selection import train_test_split
 
 # Pfad zum Datenordner anpassen
 DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'
-RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
-PREDICTION_OUT_PATH = os.path.join(DATA_PATH, 'prediction_weight_runs.csv')
-RUN_SUMMARY_OUT_PATH = os.path.join(DATA_PATH, 'prediction_weight_run_summary.csv')
-MAX_RUNS = 20
+OUTPUT_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns/Datacollection'
+RESULTS_PATH = os.path.join(OUTPUT_PATH, 'match_results_references.csv')
+FALLBACK_RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
+PREDICTION_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_runs.csv')
+RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.csv')
+MAX_RUNS = 40
+
+# === H2H K TUNING ===
+# k controls how fast H2H features gain influence:
+# alpha = MatchCount / (MatchCount + k)
+H2H_K = 2.0
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
 stammdaten    = pd.read_csv(os.path.join(DATA_PATH, 'Stammdaten_78.csv'))
-injuries      = pd.read_csv(os.path.join(DATA_PATH, 'injuries_league_78.csv'))
-lineups       = pd.read_csv(os.path.join(DATA_PATH, 'lineups_league_78.csv'))
 teams         = pd.read_csv(os.path.join(DATA_PATH, 'Teams_78.csv'))
-player_stats  = pd.read_csv(os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv'), low_memory=False)
 
 # 2. Umbenennen
 stammdaten.rename(columns={
@@ -43,25 +47,6 @@ match_stats.rename(columns={
     'Home Corners': 'HomeCorners', 'Away Corners': 'AwayCorners'
 }, inplace=True)
 
-injuries.rename(columns={
-    'Match ID': 'MatchID', 
-    'Player ID': 'PlayerID', 
-    'Player Name': 'PlayerName',
-    'Team ID': 'TeamID', 'Team Name': 'TeamName',
-    
-}, inplace=True)
-
-lineups.rename(columns={
-    'Match ID': 'MatchID', 'Home Team ID': 'HomeTeamID', 'Away Team ID': 'AwayTeamID',
-    'Player ID': 'PlayerID', 'Player Name': 'PlayerName', 'StartXI': 'StartXI'
-}, inplace=True)
-
-player_stats.rename(columns={
-    'Match ID': 'MatchID', 'Team ID': 'TeamID', 'Player ID': 'PlayerID',
-    'Player Name': 'PlayerName', 'Rating': 'Rating'
-}, inplace=True)
-player_stats['Rating'] = pd.to_numeric(player_stats['Rating'], errors='coerce')
-
 teams.rename(columns={
     'Team ID': 'TeamID', 'Team Name': 'TeamName',
     'Stadion ID': 'StadiumID', 'Capacity': 'StadiumCapacity'
@@ -78,33 +63,108 @@ df = (
     .merge(teams_away, left_on='AwayTeamID', right_on='TeamID_Away', how='left')
 )
 
-# Verletzungen aggregieren (weit, pro TeamID) und nur dort NAs füllen
-inj_agg = injuries.groupby(['MatchID', 'TeamID']).size().unstack(fill_value=0).add_prefix('NumInjuries_')
-df = df.merge(inj_agg, on='MatchID', how='left')
-inj_cols = [c for c in df.columns if c.startswith('NumInjuries_')]
-if inj_cols:
-    df[inj_cols] = df[inj_cols].fillna(0)
-
-# Aufstellungen
-home_lp = lineups[lineups['StartXI']].groupby(['MatchID','HomeTeamID']).size().reset_index(name='StartXI_Home')
-away_lp = lineups[lineups['StartXI']].groupby(['MatchID','AwayTeamID']).size().reset_index(name='StartXI_Away')
-df = df.merge(home_lp[['MatchID','StartXI_Home']], on='MatchID', how='left')
-df = df.merge(away_lp[['MatchID','StartXI_Away']], on='MatchID', how='left')
-df[['StartXI_Home','StartXI_Away']] = df[['StartXI_Home','StartXI_Away']].fillna(0)
-
-# Spielerbewertungen
-player_agg = player_stats.groupby(['MatchID','TeamID'])['Rating'].mean().unstack(fill_value=0).add_prefix('AvgRating_')
-df = df.merge(player_agg, on='MatchID', how='left')
-rating_cols = [c for c in df.columns if c.startswith('AvgRating_')]
-if rating_cols:
-    df[rating_cols] = df[rating_cols].fillna(0)
-
 # Team-Form und Grundstärke (historisch + Rolling)
 df['MatchDate'] = pd.to_datetime(df['MatchDate'], errors='coerce')
 
 played_mask = df['Played'] == True
 played_df = df[played_mask].copy()
 played_df = played_df[played_df['HomeGoals'].notna() & played_df['AwayGoals'].notna()].copy()
+
+h2h_home = played_df[['MatchID', 'MatchDate', 'HomeTeamID', 'AwayTeamID', 'HomeGoals', 'AwayGoals']].copy()
+h2h_home = h2h_home.rename(columns={
+    'HomeTeamID': 'TeamID',
+    'AwayTeamID': 'OpponentID',
+    'HomeGoals': 'GoalsFor',
+    'AwayGoals': 'GoalsAgainst'
+})
+h2h_home['IsHome'] = 1
+
+h2h_away = played_df[['MatchID', 'MatchDate', 'AwayTeamID', 'HomeTeamID', 'AwayGoals', 'HomeGoals']].copy()
+h2h_away = h2h_away.rename(columns={
+    'AwayTeamID': 'TeamID',
+    'HomeTeamID': 'OpponentID',
+    'AwayGoals': 'GoalsFor',
+    'HomeGoals': 'GoalsAgainst'
+})
+h2h_away['IsHome'] = 0
+
+h2h_long = pd.concat([h2h_home, h2h_away], ignore_index=True)
+h2h_long['Points'] = (
+    (h2h_long['GoalsFor'] > h2h_long['GoalsAgainst']).astype(int) * 3
+    + (h2h_long['GoalsFor'] == h2h_long['GoalsAgainst']).astype(int)
+)
+
+def summarize_h2h(subset):
+    if subset.empty:
+        return {
+            'AvgGoalDiff': float('nan'),
+            'AvgGoalsFor': float('nan'),
+            'AvgGoalsAgainst': float('nan'),
+            'AvgPoints': float('nan'),
+            'WinRate': float('nan'),
+            'MatchCount': float('nan')
+        }
+    goal_diff = subset['GoalsFor'] - subset['GoalsAgainst']
+    return {
+        'AvgGoalDiff': float(goal_diff.mean()),
+        'AvgGoalsFor': float(subset['GoalsFor'].mean()),
+        'AvgGoalsAgainst': float(subset['GoalsAgainst'].mean()),
+        'AvgPoints': float(subset['Points'].mean()),
+        'WinRate': float((subset['GoalsFor'] > subset['GoalsAgainst']).mean()),
+        'MatchCount': float(len(subset))
+    }
+
+def apply_h2h_reliability(stats, k):
+    if not math.isfinite(stats['MatchCount']) or stats['MatchCount'] < 0 or k <= 0:
+        return stats
+    alpha = stats['MatchCount'] / (stats['MatchCount'] + k)
+    stats['AvgGoalDiff'] *= alpha
+    stats['AvgGoalsFor'] *= alpha
+    stats['AvgGoalsAgainst'] *= alpha
+    stats['AvgPoints'] *= alpha
+    stats['WinRate'] *= alpha
+    return stats
+
+def add_h2h_features(df_src, h2h_k=H2H_K):
+    base = df_src[df_src['MatchDate'].notna()].copy()
+    out_rows = []
+    for _, row in base.iterrows():
+        match_id = row['MatchID']
+        home_id = row['HomeTeamID']
+        away_id = row['AwayTeamID']
+        match_date = row['MatchDate']
+
+        if pd.isna(home_id) or pd.isna(away_id) or pd.isna(match_date):
+            combined = summarize_h2h(pd.DataFrame())
+            venue = summarize_h2h(pd.DataFrame())
+        else:
+            subset = h2h_long[
+                (h2h_long['TeamID'] == home_id)
+                & (h2h_long['OpponentID'] == away_id)
+                & (h2h_long['MatchDate'] < match_date)
+            ]
+            combined = summarize_h2h(subset)
+            venue = summarize_h2h(subset[subset['IsHome'] == 1])
+            combined = apply_h2h_reliability(combined, h2h_k)
+            venue = apply_h2h_reliability(venue, h2h_k)
+
+        out_rows.append({
+            'MatchID': match_id,
+            'H2H_Combined_AvgGoalDiff': combined['AvgGoalDiff'],
+            'H2H_Combined_AvgGoalsFor': combined['AvgGoalsFor'],
+            'H2H_Combined_AvgGoalsAgainst': combined['AvgGoalsAgainst'],
+            'H2H_Combined_AvgPoints': combined['AvgPoints'],
+            'H2H_Combined_WinRate': combined['WinRate'],
+            'H2H_Combined_MatchCount': combined['MatchCount'],
+            'H2H_Venue_AvgGoalDiff': venue['AvgGoalDiff'],
+            'H2H_Venue_AvgGoalsFor': venue['AvgGoalsFor'],
+            'H2H_Venue_AvgGoalsAgainst': venue['AvgGoalsAgainst'],
+            'H2H_Venue_AvgPoints': venue['AvgPoints'],
+            'H2H_Venue_WinRate': venue['WinRate'],
+            'H2H_Venue_MatchCount': venue['MatchCount']
+        })
+
+    return pd.DataFrame(out_rows)
 
 home_rows = played_df[['MatchID', 'MatchDate', 'HomeTeamID', 'HomeGoals', 'AwayGoals']].copy()
 home_rows = home_rows.rename(columns={
@@ -196,6 +256,9 @@ df = df.merge(home_asof, on='MatchID', how='left')
 away_asof = add_team_asof_features(df, 'AwayTeamID', 'Away')
 df = df.merge(away_asof, on='MatchID', how='left')
 
+h2h_feats = add_h2h_features(df, h2h_k=H2H_K)
+df = df.merge(h2h_feats, on='MatchID', how='left')
+
 # 4. Split nach 'Played'
 train_df   = df[df['Played'] == True].copy()
 predict_df = df[df['Played'] == False].copy()
@@ -216,47 +279,63 @@ features = [
     'Away_BaseAvgGoalsFor', 'Away_BaseAvgGoalsAgainst', 'Away_BaseAvgPoints',
     'Home_AvgGoalsFor_L5', 'Home_AvgGoalsAgainst_L5', 'Home_AvgPoints_L5',
     'Away_AvgGoalsFor_L5', 'Away_AvgGoalsAgainst_L5', 'Away_AvgPoints_L5',
-    'StartXI_Home', 'StartXI_Away'
+    'H2H_Combined_AvgGoalDiff', 'H2H_Combined_AvgGoalsFor', 'H2H_Combined_AvgGoalsAgainst',
+    'H2H_Combined_AvgPoints', 'H2H_Combined_WinRate', 'H2H_Combined_MatchCount',
+    'H2H_Venue_AvgGoalDiff', 'H2H_Venue_AvgGoalsFor', 'H2H_Venue_AvgGoalsAgainst',
+    'H2H_Venue_AvgPoints', 'H2H_Venue_WinRate', 'H2H_Venue_MatchCount'
 ]
-features += inj_cols
-features += rating_cols
 
+match_stats_features = [
+    'HomePossession', 'AwayPossession',
+    'HomeShots', 'AwayShots',
+    'HomeShotsOnTarget', 'AwayShotsOnTarget',
+    'HomePasses', 'AwayPasses',
+    'HomePassAccuracy', 'AwayPassAccuracy',
+    'HomeFouls', 'AwayFouls',
+    'HomeYellowCard', 'AwayYellowCard',
+    'HomeRedCard', 'AwayRedCard',
+    'HomeOffsides', 'AwayOffsides',
+    'HomeCorners', 'AwayCorners'
+]
+features += match_stats_features
 
 missing = [f for f in features if f not in train_df.columns]
 if missing:
     raise ValueError(f"Fehlende Feature-Spalten im Trainingsdatensatz: {missing}")
 
-def load_reference_results(path):
-    if not os.path.exists(path):
-        return None
-    try:
-        ref = pd.read_csv(path)
-    except pd.errors.EmptyDataError:
-        return None
-    if not {'MatchID', 'HomeGoals', 'AwayGoals'}.issubset(ref.columns):
+def load_reference_results(primary_path, fallback_path=None):
+    for path in [primary_path, fallback_path]:
+        if not path or not os.path.exists(path):
+            continue
         try:
-            ref = pd.read_csv(
-                path,
-                header=None,
-                names=['MatchID', 'HomeGoals', 'AwayGoals', 'Result'],
-                usecols=[0, 1, 2, 3]
-            )
+            ref = pd.read_csv(path)
         except pd.errors.EmptyDataError:
-            return None
-    required = {'MatchID', 'HomeGoals', 'AwayGoals'}
-    if not required.issubset(ref.columns):
-        raise ValueError(f"Reference file missing columns: {sorted(required - set(ref.columns))}")
-    ref = ref.copy()
-    ref['HomeGoals'] = pd.to_numeric(ref['HomeGoals'], errors='coerce')
-    ref['AwayGoals'] = pd.to_numeric(ref['AwayGoals'], errors='coerce')
-    ref = ref.dropna(subset=['MatchID', 'HomeGoals', 'AwayGoals'])
-    if 'Result' not in ref.columns:
-        ref['Result'] = ref.apply(
-            lambda r: 'H' if r['HomeGoals'] > r['AwayGoals']
-            else ('A' if r['HomeGoals'] < r['AwayGoals'] else 'D'),
-            axis=1
-        )
-    return ref.set_index('MatchID')
+            continue
+        if not {'MatchID', 'HomeGoals', 'AwayGoals'}.issubset(ref.columns):
+            try:
+                ref = pd.read_csv(
+                    path,
+                    header=None,
+                    names=['MatchID', 'HomeGoals', 'AwayGoals', 'Result'],
+                    usecols=[0, 1, 2, 3]
+                )
+            except pd.errors.EmptyDataError:
+                continue
+        required = {'MatchID', 'HomeGoals', 'AwayGoals'}
+        if not required.issubset(ref.columns):
+            raise ValueError(f"Reference file missing columns: {sorted(required - set(ref.columns))}")
+        ref = ref.copy()
+        ref['HomeGoals'] = pd.to_numeric(ref['HomeGoals'], errors='coerce')
+        ref['AwayGoals'] = pd.to_numeric(ref['AwayGoals'], errors='coerce')
+        ref = ref.dropna(subset=['MatchID', 'HomeGoals', 'AwayGoals'])
+        if 'Result' not in ref.columns:
+            ref['Result'] = ref.apply(
+                lambda r: 'H' if r['HomeGoals'] > r['AwayGoals']
+                else ('A' if r['HomeGoals'] < r['AwayGoals'] else 'D'),
+                axis=1
+            )
+        return ref.set_index('MatchID')
+    return None
 
 # 7a. Train/Test
 X_train, X_val, y_train, y_val = train_test_split(
@@ -267,14 +346,14 @@ X_train, X_val, y_train, y_val = train_test_split(
 imputer = SimpleImputer(strategy='median')
 X_train_imp = imputer.fit_transform(X_train)
 
-ref_results = load_reference_results(RESULTS_PATH)
+ref_results = load_reference_results(RESULTS_PATH, FALLBACK_RESULTS_PATH)
 run_limit = MAX_RUNS if ref_results is not None else 1
 
 print("GoalDiff NaNs:", train_df['GoalDiff'].isna().sum())
 print("X_train NaNs (raw):", X_train.isna().sum().sum())
 print("X_train_imp NaNs:", pd.isna(X_train_imp).sum())
 if ref_results is None:
-    print(f"Reference results not found at {RESULTS_PATH}; running only 1 weight set.")
+    print(f"Reference results not found at {RESULTS_PATH} (or fallback {FALLBACK_RESULTS_PATH}); running only 1 weight set.")
 
 
 # 9. Vorhersage (nur naechste 9)
@@ -350,12 +429,46 @@ else:
         pred_df['HomeTeam']  = predict_df['HomeTeam'].values
         pred_df['AwayTeam']  = predict_df['AwayTeam'].values
 
+        if 'H2H_Combined_MatchCount' in predict_df.columns:
+            pred_df['H2H_Combined_MatchCount'] = predict_df['H2H_Combined_MatchCount'].values
+        if 'H2H_Venue_MatchCount' in predict_df.columns:
+            pred_df['H2H_Venue_MatchCount'] = predict_df['H2H_Venue_MatchCount'].values
+
         for feat in features:
             pred_df[f'Weight_{feat}'] = weights[feat]
+
+        # Individualized H2H influence (per match) based on MatchCount and H2H_K
+        if 'H2H_Combined_MatchCount' in pred_df.columns:
+            pred_df['H2H_Combined_Alpha'] = pred_df['H2H_Combined_MatchCount'].apply(
+                lambda c: c / (c + H2H_K) if pd.notna(c) and c >= 0 else float('nan')
+            )
+        if 'H2H_Venue_MatchCount' in pred_df.columns:
+            pred_df['H2H_Venue_Alpha'] = pred_df['H2H_Venue_MatchCount'].apply(
+                lambda c: c / (c + H2H_K) if pd.notna(c) and c >= 0 else float('nan')
+            )
+
+        h2h_combined_feats = [
+            'H2H_Combined_AvgGoalDiff', 'H2H_Combined_AvgGoalsFor', 'H2H_Combined_AvgGoalsAgainst',
+            'H2H_Combined_AvgPoints', 'H2H_Combined_WinRate'
+        ]
+        h2h_venue_feats = [
+            'H2H_Venue_AvgGoalDiff', 'H2H_Venue_AvgGoalsFor', 'H2H_Venue_AvgGoalsAgainst',
+            'H2H_Venue_AvgPoints', 'H2H_Venue_WinRate'
+        ]
+
+        if 'H2H_Combined_Alpha' in pred_df.columns:
+            for feat in h2h_combined_feats:
+                if f'Weight_{feat}' in pred_df.columns:
+                    pred_df[f'EffectiveWeight_{feat}'] = pred_df[f'Weight_{feat}'] * pred_df['H2H_Combined_Alpha']
+        if 'H2H_Venue_Alpha' in pred_df.columns:
+            for feat in h2h_venue_feats:
+                if f'Weight_{feat}' in pred_df.columns:
+                    pred_df[f'EffectiveWeight_{feat}'] = pred_df[f'Weight_{feat}'] * pred_df['H2H_Venue_Alpha']
 
         run_score = None
         run_accuracy = None
         run_count = 0
+        early_stop = False
         if ref_results is not None:
             merged = pred_df.merge(
                 ref_results[['HomeGoals', 'AwayGoals', 'Result']],
@@ -395,21 +508,26 @@ else:
                 if all_correct:
                     best_run = run_id
                     best_score = run_score
-                    all_runs.append(pred_df)
-                    break
+                    early_stop = True
 
         if run_score is not None:
             if best_score is None or run_score < best_score:
                 best_score = run_score
                 best_run = run_id
 
-        run_metrics.append({
+        metric_row = {
             'RunID': run_id,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
             'NumMatchesScored': run_count
-        })
+        }
+        for feat in features:
+            metric_row[f'Weight_{feat}'] = weights[feat]
+        run_metrics.append(metric_row)
         all_runs.append(pred_df)
+
+        if early_stop:
+            break
 
     all_pred_df = pd.concat(all_runs, ignore_index=True)
     all_pred_df.to_csv(PREDICTION_OUT_PATH, index=False)
