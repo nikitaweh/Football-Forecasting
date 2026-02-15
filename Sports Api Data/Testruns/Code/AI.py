@@ -3,8 +3,12 @@ import os
 import random
 import pandas as pd
 from bartpy.sklearnmodel import SklearnModel
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 # Pfad zum Datenordner anpassen
 DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'
@@ -13,17 +17,62 @@ RESULTS_PATH = os.path.join(OUTPUT_PATH, 'match_results_references.csv')
 FALLBACK_RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
 PREDICTION_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_runs.csv')
 RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.csv')
-MAX_RUNS = 40
+RUN_HISTORY_PATH = os.path.join(OUTPUT_PATH, 'surrogate_run_history.csv')
+PARETO_OUT_PATH = os.path.join(OUTPUT_PATH, 'pareto_front.csv')
+WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
+WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
+MAX_RUNS = 700
 
-# === H2H K TUNING ===
-# k controls how fast H2H features gain influence:
-# alpha = MatchCount / (MatchCount + k)
-H2H_K = 2.0
+# === SURROGATE MODEL SWITCH ===
+# "gbr" = Gradient Boosting (recommended for now)
+# "nn"  = Neural Network surrogate (use when you have much more data)
+SURROGATE_MODEL = 'gbr'
+SURROGATE_MIN_HISTORY = 100
+SURROGATE_CANDIDATES = 300
+SURROGATE_RANDOM_FRACTION = 0.2
+
+# === H2H K SEARCH RANGE (integers only) ===
+H2H_K_RANGE = (1, 10)
+H2H_K_DEFAULT = 2
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
 stammdaten    = pd.read_csv(os.path.join(DATA_PATH, 'Stammdaten_78.csv'))
 teams         = pd.read_csv(os.path.join(DATA_PATH, 'Teams_78.csv'))
+
+def load_weather(path):
+    if not path or not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        w = pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+    w = w.rename(columns={
+        'Temperature (C)': 'Weather_Temperature_C',
+        'Pressure': 'Weather_Pressure',
+        'Humidity': 'Weather_Humidity',
+        'Wind Speed': 'Weather_WindSpeed',
+        'Wind Direction': 'Weather_WindDirection',
+        'Rain': 'Weather_Rain',
+        'Snow': 'Weather_Snow'
+    })
+    keep_cols = [
+        'MatchID',
+        'Weather_Temperature_C',
+        'Weather_Pressure',
+        'Weather_Humidity',
+        'Weather_WindSpeed',
+        'Weather_WindDirection',
+        'Weather_Rain',
+        'Weather_Snow'
+    ]
+    for col in keep_cols:
+        if col not in w.columns:
+            w[col] = float('nan')
+    w = w[keep_cols]
+    for col in keep_cols[1:]:
+        w[col] = pd.to_numeric(w[col], errors='coerce')
+    return w
 
 # 2. Umbenennen
 stammdaten.rename(columns={
@@ -62,6 +111,14 @@ df = (
     .merge(teams_home, left_on='HomeTeamID', right_on='TeamID_Home', how='left')
     .merge(teams_away, left_on='AwayTeamID', right_on='TeamID_Away', how='left')
 )
+
+weather_hist = load_weather(WEATHER_HIST_PATH)
+weather_future = load_weather(WEATHER_FUTURE_PATH)
+if not weather_hist.empty or not weather_future.empty:
+    weather_all = pd.concat([weather_hist, weather_future], ignore_index=True)
+    weather_all = weather_all.dropna(subset=['MatchID'])
+    weather_all = weather_all.drop_duplicates(subset=['MatchID'], keep='last')
+    df = df.merge(weather_all, on='MatchID', how='left')
 
 # Team-Form und Grundstärke (historisch + Rolling)
 df['MatchDate'] = pd.to_datetime(df['MatchDate'], errors='coerce')
@@ -114,18 +171,7 @@ def summarize_h2h(subset):
         'MatchCount': float(len(subset))
     }
 
-def apply_h2h_reliability(stats, k):
-    if not math.isfinite(stats['MatchCount']) or stats['MatchCount'] < 0 or k <= 0:
-        return stats
-    alpha = stats['MatchCount'] / (stats['MatchCount'] + k)
-    stats['AvgGoalDiff'] *= alpha
-    stats['AvgGoalsFor'] *= alpha
-    stats['AvgGoalsAgainst'] *= alpha
-    stats['AvgPoints'] *= alpha
-    stats['WinRate'] *= alpha
-    return stats
-
-def add_h2h_features(df_src, h2h_k=H2H_K):
+def add_h2h_features(df_src):
     base = df_src[df_src['MatchDate'].notna()].copy()
     out_rows = []
     for _, row in base.iterrows():
@@ -145,8 +191,6 @@ def add_h2h_features(df_src, h2h_k=H2H_K):
             ]
             combined = summarize_h2h(subset)
             venue = summarize_h2h(subset[subset['IsHome'] == 1])
-            combined = apply_h2h_reliability(combined, h2h_k)
-            venue = apply_h2h_reliability(venue, h2h_k)
 
         out_rows.append({
             'MatchID': match_id,
@@ -165,6 +209,29 @@ def add_h2h_features(df_src, h2h_k=H2H_K):
         })
 
     return pd.DataFrame(out_rows)
+
+H2H_COMBINED_FEATURES = [
+    'H2H_Combined_AvgGoalDiff', 'H2H_Combined_AvgGoalsFor', 'H2H_Combined_AvgGoalsAgainst',
+    'H2H_Combined_AvgPoints', 'H2H_Combined_WinRate'
+]
+H2H_VENUE_FEATURES = [
+    'H2H_Venue_AvgGoalDiff', 'H2H_Venue_AvgGoalsFor', 'H2H_Venue_AvgGoalsAgainst',
+    'H2H_Venue_AvgPoints', 'H2H_Venue_WinRate'
+]
+
+def apply_h2h_scaling(feature_df, k):
+    df_scaled = feature_df.copy()
+    if 'H2H_Combined_MatchCount' in df_scaled.columns:
+        alpha_c = df_scaled['H2H_Combined_MatchCount'] / (df_scaled['H2H_Combined_MatchCount'] + k)
+        for col in H2H_COMBINED_FEATURES:
+            if col in df_scaled.columns:
+                df_scaled[col] = df_scaled[col] * alpha_c
+    if 'H2H_Venue_MatchCount' in df_scaled.columns:
+        alpha_v = df_scaled['H2H_Venue_MatchCount'] / (df_scaled['H2H_Venue_MatchCount'] + k)
+        for col in H2H_VENUE_FEATURES:
+            if col in df_scaled.columns:
+                df_scaled[col] = df_scaled[col] * alpha_v
+    return df_scaled
 
 home_rows = played_df[['MatchID', 'MatchDate', 'HomeTeamID', 'HomeGoals', 'AwayGoals']].copy()
 home_rows = home_rows.rename(columns={
@@ -256,7 +323,7 @@ df = df.merge(home_asof, on='MatchID', how='left')
 away_asof = add_team_asof_features(df, 'AwayTeamID', 'Away')
 df = df.merge(away_asof, on='MatchID', how='left')
 
-h2h_feats = add_h2h_features(df, h2h_k=H2H_K)
+h2h_feats = add_h2h_features(df)
 df = df.merge(h2h_feats, on='MatchID', how='left')
 
 # 4. Split nach 'Played'
@@ -299,6 +366,18 @@ match_stats_features = [
 ]
 features += match_stats_features
 
+weather_features = [
+    'Weather_Temperature_C',
+    'Weather_Pressure',
+    'Weather_Humidity',
+    'Weather_WindSpeed',
+    'Weather_WindDirection',
+    'Weather_Rain',
+    'Weather_Snow'
+]
+features += weather_features
+weight_cols = [f'Weight_{feat}' for feat in features]
+
 missing = [f for f in features if f not in train_df.columns]
 if missing:
     raise ValueError(f"Fehlende Feature-Spalten im Trainingsdatensatz: {missing}")
@@ -337,21 +416,92 @@ def load_reference_results(primary_path, fallback_path=None):
         return ref.set_index('MatchID')
     return None
 
+def compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy'):
+    base = df.dropna(subset=[nll_col, acc_col]).copy()
+    if base.empty:
+        return base
+    base = base.sort_values([nll_col, acc_col], ascending=[True, False])
+    pareto_rows = []
+    best_acc = -float('inf')
+    for _, row in base.iterrows():
+        if row[acc_col] > best_acc:
+            pareto_rows.append(row)
+            best_acc = row[acc_col]
+    return pd.DataFrame(pareto_rows)
+
+def load_run_history(path, weight_cols):
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        hist = pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+    for col in weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K']:
+        if col not in hist.columns:
+            hist[col] = float('nan')
+    if 'H2H_K' in hist.columns:
+        hist['H2H_K'] = hist['H2H_K'].fillna(H2H_K_DEFAULT)
+    for col in weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K']:
+        hist[col] = pd.to_numeric(hist[col], errors='coerce')
+    hist = hist.dropna(subset=weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K'])
+    return hist
+
+def train_surrogate_model(history_df, feature_cols, target_col):
+    X = history_df[feature_cols]
+    y = history_df[target_col]
+    if SURROGATE_MODEL == 'nn':
+        model = make_pipeline(
+            StandardScaler(),
+            MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42)
+        )
+    else:
+        model = GradientBoostingRegressor(random_state=42)
+    model.fit(X, y)
+    return model
+
+def generate_candidate_df(num, features, k_range):
+    rows = []
+    for _ in range(num):
+        row = {f'Weight_{feat}': random.random() * 2.0 for feat in features}
+        row['H2H_K'] = random.randint(int(k_range[0]), int(k_range[1]))
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+def select_candidates_with_surrogate(candidates_df, pred_nll, pred_acc, max_runs, random_frac):
+    df = candidates_df.copy()
+    df['Pred_AvgNLL'] = pred_nll
+    df['Pred_Accuracy'] = pred_acc
+    pareto = compute_pareto_front(df, 'Pred_AvgNLL', 'Pred_Accuracy')
+    pareto = pareto.sort_values(['Pred_AvgNLL', 'Pred_Accuracy'], ascending=[True, False])
+
+    explore_count = int(max_runs * random_frac)
+    exploit_count = max_runs - explore_count
+
+    selected = pareto.head(exploit_count)
+    if len(selected) < exploit_count:
+        remaining = df.drop(selected.index)
+        fill_needed = exploit_count - len(selected)
+        fill = remaining.sort_values(['Pred_AvgNLL', 'Pred_Accuracy'], ascending=[True, False]).head(fill_needed)
+        selected = pd.concat([selected, fill])
+
+    remaining = df.drop(selected.index)
+    if explore_count > 0 and not remaining.empty:
+        explore = remaining.sample(n=min(explore_count, len(remaining)), random_state=42)
+        selected = pd.concat([selected, explore])
+
+    return selected.reset_index(drop=True)
+
 # 7a. Train/Test
 X_train, X_val, y_train, y_val = train_test_split(
     train_df[features], train_df['GoalDiff'], test_size=0.2, random_state=42
 )
 
-# 8. Trainieren
-imputer = SimpleImputer(strategy='median')
-X_train_imp = imputer.fit_transform(X_train)
-
+# 8. Trainieren (pro Run, nach H2H-Skalierung)
 ref_results = load_reference_results(RESULTS_PATH, FALLBACK_RESULTS_PATH)
 run_limit = MAX_RUNS if ref_results is not None else 1
 
 print("GoalDiff NaNs:", train_df['GoalDiff'].isna().sum())
 print("X_train NaNs (raw):", X_train.isna().sum().sum())
-print("X_train_imp NaNs:", pd.isna(X_train_imp).sum())
 if ref_results is None:
     print(f"Reference results not found at {RESULTS_PATH} (or fallback {FALLBACK_RESULTS_PATH}); running only 1 weight set.")
 
@@ -362,8 +512,8 @@ if predict_df.empty:
     print("Keine ungespielten Spiele gefunden. Leere Ergebnis-Tabelle:")
     print(pred_df.head(9))
 else:
-    X_pred = predict_df[features]
-    X_pred_imp = imputer.transform(X_pred)
+    X_train_base = X_train.copy()
+    X_pred_base = predict_df[features].copy()
 
     draw_margin = 0.5
 
@@ -382,9 +532,45 @@ else:
     best_score = None
     best_run = None
 
-    for run_id in range(1, run_limit + 1):
-        weights = {f: random.random() * 2.0 for f in features}
+    history_df = load_run_history(RUN_HISTORY_PATH, weight_cols)
+    use_surrogate = len(history_df) >= SURROGATE_MIN_HISTORY
+
+    if use_surrogate:
+        feature_cols = weight_cols + ['H2H_K']
+        nll_model = train_surrogate_model(history_df, feature_cols, 'AvgNLL')
+        acc_model = train_surrogate_model(history_df, feature_cols, 'Accuracy')
+        candidate_df = generate_candidate_df(max(SURROGATE_CANDIDATES, run_limit), features, H2H_K_RANGE)
+        pred_nll = nll_model.predict(candidate_df[feature_cols])
+        pred_acc = acc_model.predict(candidate_df[feature_cols])
+        selected_df = select_candidates_with_surrogate(
+            candidate_df,
+            pred_nll,
+            pred_acc,
+            run_limit,
+            SURROGATE_RANDOM_FRACTION
+        )
+    else:
+        selected_df = generate_candidate_df(run_limit, features, H2H_K_RANGE)
+
+    batch_id = 1
+    if not history_df.empty and 'BatchID' in history_df.columns:
+        try:
+            batch_id = int(history_df['BatchID'].max()) + 1
+        except Exception:
+            batch_id = 1
+
+    for idx, cand in selected_df.iterrows():
+        run_id = idx + 1
+        run_k = int(cand['H2H_K'])
+        weights = {feat: float(cand[f'Weight_{feat}']) for feat in features}
         weight_vec = pd.Series(weights, index=features).values
+
+        X_train_scaled = apply_h2h_scaling(X_train_base, run_k)
+        X_pred_scaled = apply_h2h_scaling(X_pred_base, run_k)
+
+        imputer = SimpleImputer(strategy='median')
+        X_train_imp = imputer.fit_transform(X_train_scaled)
+        X_pred_imp = imputer.transform(X_pred_scaled)
 
         X_train_w = X_train_imp * weight_vec
         model = SklearnModel(n_trees=50)
@@ -428,6 +614,7 @@ else:
         pred_df['MatchDate'] = predict_df['MatchDate'].values
         pred_df['HomeTeam']  = predict_df['HomeTeam'].values
         pred_df['AwayTeam']  = predict_df['AwayTeam'].values
+        pred_df['H2H_K'] = run_k
 
         if 'H2H_Combined_MatchCount' in predict_df.columns:
             pred_df['H2H_Combined_MatchCount'] = predict_df['H2H_Combined_MatchCount'].values
@@ -437,31 +624,21 @@ else:
         for feat in features:
             pred_df[f'Weight_{feat}'] = weights[feat]
 
-        # Individualized H2H influence (per match) based on MatchCount and H2H_K
         if 'H2H_Combined_MatchCount' in pred_df.columns:
             pred_df['H2H_Combined_Alpha'] = pred_df['H2H_Combined_MatchCount'].apply(
-                lambda c: c / (c + H2H_K) if pd.notna(c) and c >= 0 else float('nan')
+                lambda c: c / (c + run_k) if pd.notna(c) and c >= 0 else float('nan')
             )
         if 'H2H_Venue_MatchCount' in pred_df.columns:
             pred_df['H2H_Venue_Alpha'] = pred_df['H2H_Venue_MatchCount'].apply(
-                lambda c: c / (c + H2H_K) if pd.notna(c) and c >= 0 else float('nan')
+                lambda c: c / (c + run_k) if pd.notna(c) and c >= 0 else float('nan')
             )
 
-        h2h_combined_feats = [
-            'H2H_Combined_AvgGoalDiff', 'H2H_Combined_AvgGoalsFor', 'H2H_Combined_AvgGoalsAgainst',
-            'H2H_Combined_AvgPoints', 'H2H_Combined_WinRate'
-        ]
-        h2h_venue_feats = [
-            'H2H_Venue_AvgGoalDiff', 'H2H_Venue_AvgGoalsFor', 'H2H_Venue_AvgGoalsAgainst',
-            'H2H_Venue_AvgPoints', 'H2H_Venue_WinRate'
-        ]
-
         if 'H2H_Combined_Alpha' in pred_df.columns:
-            for feat in h2h_combined_feats:
+            for feat in H2H_COMBINED_FEATURES:
                 if f'Weight_{feat}' in pred_df.columns:
                     pred_df[f'EffectiveWeight_{feat}'] = pred_df[f'Weight_{feat}'] * pred_df['H2H_Combined_Alpha']
         if 'H2H_Venue_Alpha' in pred_df.columns:
-            for feat in h2h_venue_feats:
+            for feat in H2H_VENUE_FEATURES:
                 if f'Weight_{feat}' in pred_df.columns:
                     pred_df[f'EffectiveWeight_{feat}'] = pred_df[f'Weight_{feat}'] * pred_df['H2H_Venue_Alpha']
 
@@ -517,6 +694,8 @@ else:
 
         metric_row = {
             'RunID': run_id,
+            'BatchID': batch_id,
+            'H2H_K': run_k,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
             'NumMatchesScored': run_count
@@ -536,8 +715,14 @@ else:
     print(all_pred_df[cols].head(10))
     if best_run is not None:
         print(f"Best run: {best_run} (avg NLL={best_score:.6f})")
-    if ref_results is not None and run_metrics:
+    if run_metrics:
         summary_df = pd.DataFrame(run_metrics)
         summary_df = summary_df.sort_values(['AvgNLL', 'Accuracy'], ascending=[True, False])
         summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
         print(summary_df.head(5))
+
+        history_updated = pd.concat([history_df, summary_df], ignore_index=True)
+        history_updated.to_csv(RUN_HISTORY_PATH, index=False)
+
+        pareto_df = compute_pareto_front(history_updated)
+        pareto_df.to_csv(PARETO_OUT_PATH, index=False)
