@@ -50,7 +50,7 @@ def _adjust_request_time(dt_local):
         hour=3, minute=0, second=0, microsecond=0, tzinfo=tz
     )
     end = _last_sunday(year, 10).replace(
-        hour=1, minute=59, second=0, microsecond=0, tzinfo=tz
+        hour=1, minute=59, second=59, microsecond=999, tzinfo=tz
     )
     if start <= dt_local <= end:
         return dt_local - pd.Timedelta(hours=2)
@@ -100,8 +100,7 @@ def main(overwrite=False):
     # 2) Stammdaten einlesen und DateTime kombinieren
     stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    now = datetime.now()
-    stam_df = stam_df[stam_df['DateTime'] <= now]
+    stam_df = stam_df[stam_df['DateTime'] < datetime.now()]
 
     # 3) Aufbereitung der lokalen Wetterdaten
     weather_df['dt_iso'] = weather_df['dt_iso'].str.replace(" +0000 UTC", "", regex=False)
@@ -169,31 +168,26 @@ def query_api_data_by_match_id():
         return
 
     exist_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
-    key_cols = ['MatchID','Home Team ID','Home Team','City','DateTime']
-    existing_keys = set(exist_df[key_cols].itertuples(index=False, name=None))
+    max_id = exist_df['MatchID'].max()
+    print(f"Max MatchID in CSV: {max_id}")
 
     stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    now = datetime.now()
-    stam_df = stam_df[stam_df['DateTime'] <= now]
+    stam_df = stam_df[stam_df['DateTime'] < datetime.now()]
 
-    if stam_df.empty:
-        print("Keine Spiele gefunden (nur bereits gestartete Spiele werden beruecksichtigt).")
+    new_games = stam_df[stam_df['MatchID'] > max_id]
+    if new_games.empty:
+        print("Keine neuen Spiele gefunden.")
         return
+    print(f"Neue Spiele: {new_games['MatchID'].tolist()}")
 
     coords_df = pd.read_csv(city_coordinates_file)
-    merged = stam_df.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
+    merged = new_games.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
 
     api_rows = []
     for _, row in merged.iterrows():
         for off in get_weather_offsets(row['DateTime']):
             dt_req = row['DateTime'] + off
-            if dt_req > now:
-                continue
-            dt_req_str = dt_req.strftime("%A %d %B,%Y,%H:%M")
-            key = (row['MatchID'], row['Home Team ID'], row['Home Team'], row['City'], dt_req_str)
-            if key in existing_keys:
-                continue
             print(f"Hole Wetterdaten für Match {row['MatchID']} um {dt_req}")
             w = fetch_weather(row['Latitude'], row['Longitude'], dt_req)
             api_rows.append({
@@ -215,9 +209,9 @@ def query_api_data_by_match_id():
         new_df = pd.DataFrame(api_rows)
         new_df['DateTime'] = new_df['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
         new_df.to_csv(output_csv_file, mode='a', header=False, index=False)
-        print(f"{len(new_df)} neue Zeilen angehaengt.")
+        print(f"{len(new_df)} neue Zeilen angehängt. Neue Max MatchID: {new_df['MatchID'].max()}")
     else:
-        print("Keine neuen API-Daten abgerufen (nur vergangene Stunden werden abgefragt).")
+        print("Keine neuen API-Daten abgerufen.")
 
 # ---------------------------
 # Aktualisierung: Letztes Jahr neu per API abrufen
@@ -325,6 +319,3 @@ if __name__ == "__main__":
         print("Scheduler gestartet - prueft jede volle Stunde (Europe/Berlin)")
         sched.start()
 
-def new_df():
-    new_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
-    print(new_df.tail(10))

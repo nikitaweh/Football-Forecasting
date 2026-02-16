@@ -12,6 +12,22 @@ from apscheduler.triggers.cron import CronTrigger
 stammdaten_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
 city_coordinates_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
 output_csv_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/future_weather_data_78.csv"
+history_csv_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/future_weather_data_78_history.csv"
+
+OUTPUT_COLUMNS = [
+    "MatchID",
+    "Home Team ID",
+    "Home Team",
+    "City",
+    "DateTime",
+    "Temperature (C)",
+    "Pressure",
+    "Humidity",
+    "Wind Speed",
+    "Wind Direction",
+    "Rain",
+    "Snow"
+]
 
 # ---------------------------
 # OpenWeather API Key und Forecast-Endpoint
@@ -157,25 +173,14 @@ def _extract_weather(entry, source):
         "Snow": entry.get("snow", {}).get("3h", 0)
     }
 
-def _ensure_output_csv():
-    columns = [
-        "MatchID",
-        "Home Team ID",
-        "Home Team",
-        "City",
-        "DateTime",
-        "Temperature (C)",
-        "Pressure",
-        "Humidity",
-        "Wind Speed",
-        "Wind Direction",
-        "Rain",
-        "Snow"
-    ]
+def _write_output_csv(df):
     os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
-    if not os.path.exists(output_csv_file):
-        pd.DataFrame(columns=columns).to_csv(output_csv_file, index=False)
-        print("Leere Forecast-CSV erstellt:", output_csv_file)
+    if df.empty:
+        pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(output_csv_file, index=False)
+        print("Keine neuen Forecast-Zeilen. Output-CSV geleert:", output_csv_file)
+    else:
+        df.to_csv(output_csv_file, index=False)
+        print(f"{len(df)} neue Forecast-Zeilen geschrieben: {output_csv_file}")
 
 # ---------------------------
 # main(): Holt Forecasts fuer zukuenftige Matches
@@ -185,7 +190,7 @@ def main():
     fixtures = _build_future_fixtures(now_local)
     if not fixtures:
         print("Keine zukuenftigen Spiele in den Stammdaten gefunden.")
-        _ensure_output_csv()
+        _write_output_csv(pd.DataFrame(columns=OUTPUT_COLUMNS))
         return
 
     forecast_cache = {}
@@ -201,7 +206,7 @@ def main():
 
         for off in get_weather_offsets(fx["MatchDateTime"]):
             dt_req_local = (fx["MatchDateTime"] + off).replace(minute=0, second=0, microsecond=0)
-            if dt_req_local < now_local:
+            if dt_req_local <= now_local:
                 continue
             dt_req_utc = dt_req_local.astimezone(ZoneInfo("UTC"))
             entry = _pick_forecast_entry(forecast, dt_req_utc)
@@ -226,27 +231,33 @@ def main():
 
     if not rows:
         print("Keine Forecast-Zeilen im API-Zeitraum gefunden.")
-        _ensure_output_csv()
+        _write_output_csv(pd.DataFrame(columns=OUTPUT_COLUMNS))
         return
 
     out = pd.DataFrame(rows)
     out = out.drop_duplicates(subset=["MatchID", "Home Team ID", "Home Team", "City", "DateTime"])
     out["DateTime"] = out["DateTime"].dt.strftime("%A %d %B,%Y,%H:%M")
 
-    os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
-    if os.path.exists(output_csv_file):
-        exist_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
-        key_cols = ["MatchID", "Home Team ID", "Home Team", "City", "DateTime"]
-        merged = out.merge(exist_df[key_cols], on=key_cols, how="left", indicator=True)
-        new_out = merged[merged["_merge"] == "left_only"][out.columns]
-        if new_out.empty:
-            print("Keine neuen Forecast-Zeilen.")
-        else:
-            new_out.to_csv(output_csv_file, mode="a", header=False, index=False)
-            print(f"{len(new_out)} neue Forecast-Zeilen angehaengt: {output_csv_file}")
+    if os.path.exists(history_csv_file):
+        history_df = pd.read_csv(history_csv_file, dtype={"MatchID": int})
+    elif os.path.exists(output_csv_file):
+        history_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
+        os.makedirs(os.path.dirname(history_csv_file), exist_ok=True)
+        history_df.to_csv(history_csv_file, index=False)
+        print("History-CSV aus bestehender Output-CSV initialisiert:", history_csv_file)
     else:
-        out.to_csv(output_csv_file, index=False)
-        print("Forecast-CSV erstellt:", output_csv_file)
+        history_df = pd.DataFrame(columns=OUTPUT_COLUMNS)
+        os.makedirs(os.path.dirname(history_csv_file), exist_ok=True)
+        history_df.to_csv(history_csv_file, index=False)
+        print("Leere History-CSV erstellt:", history_csv_file)
+    key_cols = ["MatchID", "Home Team ID", "Home Team", "City", "DateTime"]
+    merged = out.merge(history_df[key_cols], on=key_cols, how="left", indicator=True)
+    new_out = merged[merged["_merge"] == "left_only"][out.columns]
+
+    _write_output_csv(new_out)
+    if not new_out.empty:
+        new_out.to_csv(history_csv_file, mode="a", header=False, index=False)
+        print(f"{len(new_out)} neue Forecast-Zeilen an History angehaengt: {history_csv_file}")
 
 # ---------------------------
 # Scheduler helper: Run only on full hours that match current games
@@ -274,7 +285,7 @@ def run_if_match_hour():
 if __name__ == "__main__":
     main()
     # Scheduler nur starten, wenn explizit aktiviert
-    enable_scheduler = False
+    enable_scheduler = True
     if enable_scheduler:
         sched = BlockingScheduler(timezone="Europe/Berlin")
         sched.add_job(
@@ -283,4 +294,3 @@ if __name__ == "__main__":
         )
         print("Scheduler gestartet - prueft jede volle Stunde (Europe/Berlin)")
         sched.start()
-
