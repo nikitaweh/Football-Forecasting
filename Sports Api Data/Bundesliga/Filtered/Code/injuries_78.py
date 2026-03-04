@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/injuries_league_78.json"
 OUTPUT_CSV = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/injuries_league_78.csv"
+NO_DATA_MARKER = "NaN"
 
 # ---------------------------
 # Teamnamen-Overrides
@@ -57,6 +58,11 @@ def convert_injuries_to_csv():
             if not entries:
                 continue
             for inj in entries:
+                if not isinstance(inj, dict):
+                    continue
+                if inj.get("no_data") == NO_DATA_MARKER:
+                    continue
+
                 team_name = inj.get('team', {}).get('name', '')
                 team_name = team_name_overrides.get(team_name, team_name)
 
