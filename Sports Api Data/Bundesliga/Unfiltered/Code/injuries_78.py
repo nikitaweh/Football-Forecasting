@@ -25,12 +25,13 @@ HEADERS = {
 
 def fetch_injuries(full_load=False):
     """
-    Wenn full_load=True: Alle bestehenden Injury-Daten löschen und für
-    alle Fixture-IDs Injuries neu abfragen.
-    Wenn full_load=False: Nur Injuries für neue Fixture-IDs abrufen.
+    Full-Load ist deaktiviert.
+    Es werden immer neue Fixtures abgerufen und leere Einträge erneut abgefragt.
     """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now}] Starte fetch_injuries(full_load={full_load}) …")
+    if full_load:
+        print(f"[{now}] Hinweis: --full-load ist deaktiviert. Es wird inkrementell fortgesetzt.")
+    print(f"[{now}] Starte fetch_injuries(inkrementell) ...")
 
     # 1) Fixture-IDs aus Input laden
     with open(INPUT_FILE, 'r', encoding='utf-8') as f:
@@ -43,27 +44,28 @@ def fetch_injuries(full_load=False):
             fixture_ids.append(fid)
     print(f"[{now}] Gefundene Fixture-IDs insgesamt: {len(fixture_ids)}")
 
-    # 2) Injuries-Store initialisieren oder löschen
-    if full_load:
-        if os.path.exists(OUTPUT_FILE):
-            os.remove(OUTPUT_FILE)
-            print(f"[{now}] Alte Injuries-Datei gelöscht (Full-Load).")
-        existing = {}
+    # 2) Injuries-Store laden
+    if os.path.exists(OUTPUT_FILE):
+        with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
+            existing = json.load(f).get('injuries_by_fixture', {})
     else:
-        if os.path.exists(OUTPUT_FILE):
-            with open(OUTPUT_FILE, 'r', encoding='utf-8') as f:
-                existing = json.load(f).get('injuries_by_fixture', {})
-        else:
-            existing = {}
+        existing = {}
 
     # 3) Zu verarbeitende Fixture-IDs bestimmen
-    if full_load:
-        new_ids = fixture_ids
-    else:
-        new_ids = [fid for fid in fixture_ids if str(fid) not in existing]
+    ids_with_data = {
+        fid_str
+        for fid_str, injuries in existing.items()
+        if isinstance(injuries, list) and len(injuries) > 0
+    }
+
+    # Skip nur IDs mit bereits vorhandenem Injury-Inhalt.
+    # IDs mit leerer Liste werden erneut abgefragt.
+    new_ids = [fid for fid in fixture_ids if str(fid) not in ids_with_data]
     print(f"[{now}] Zu verarbeitende Fixture-IDs: {len(new_ids)}")
 
     # 4) Injuries für jede ID abrufen
+    refreshed = 0
+    refreshed_with_data = 0
     for fid in new_ids:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{ts}] Hole Injuries für Fixture {fid} …")
@@ -86,13 +88,19 @@ def fetch_injuries(full_load=False):
                 inj['league'].pop('flag', None)
 
         existing[str(fid)] = injuries_list
+        refreshed += 1
+        if injuries_list:
+            refreshed_with_data += 1
 
     # 5) Speichern
     os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump({'injuries_by_fixture': existing}, f, ensure_ascii=False, indent=2)
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Injuries gespeichert in: {OUTPUT_FILE}")
+    print(
+        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Injuries gespeichert in: {OUTPUT_FILE} "
+        f"(aktualisiert: {refreshed}, mit Daten: {refreshed_with_data})"
+    )
 
 
 if __name__ == "__main__":
@@ -100,19 +108,18 @@ if __name__ == "__main__":
     parser.add_argument(
         '--full-load',
         action='store_true',
-        help='Alte Injuries-Datei löschen und alle Fixture-IDs neu abfragen'
+        help='Deaktiviert: wird ignoriert, es laeuft immer inkrementell'
     )
     args = parser.parse_args()
 
-    # Einmaliger Erstaufruf – Full- oder Incremental-Load je nach Flag
+    # Einmaliger Erstaufruf (immer inkrementell)
     fetch_injuries(full_load=args.full_load)
 
     # Scheduler für inkrementelle Updates (ohne Full-Load)
     sched = BlockingScheduler(timezone="Europe/Berlin")
     sched.add_job(
         fetch_injuries,
-        trigger=CronTrigger(day_of_week="sat,sun,mon", hour="1", minute="0"),
-        kwargs={'full_load': False}
+        trigger=CronTrigger(day_of_week="sat,sun,mon", hour="1", minute="0")
     )
-    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S'}] Scheduler gestartet für sa, so & mo 01:00 Uhr (incremental)")
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Scheduler gestartet für sa, so & mo 01:00 Uhr (incremental)")
     sched.start()

@@ -168,26 +168,31 @@ def query_api_data_by_match_id():
         return
 
     exist_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
-    max_id = exist_df['MatchID'].max()
-    print(f"Max MatchID in CSV: {max_id}")
+    key_cols = ['MatchID','Home Team ID','Home Team','City','DateTime']
+    existing_keys = set(exist_df[key_cols].itertuples(index=False, name=None))
 
     stam_df = pd.read_csv(stammdaten_file, dtype={"MatchID": int})
     stam_df['DateTime'] = pd.to_datetime(stam_df['Date'] + ' ' + stam_df['Time'])
-    stam_df = stam_df[stam_df['DateTime'] < datetime.now()]
+    now = datetime.now()
+    stam_df = stam_df[stam_df['DateTime'] < now]
 
-    new_games = stam_df[stam_df['MatchID'] > max_id]
-    if new_games.empty:
-        print("Keine neuen Spiele gefunden.")
+    if stam_df.empty:
+        print("Keine gestarteten Spiele gefunden.")
         return
-    print(f"Neue Spiele: {new_games['MatchID'].tolist()}")
 
     coords_df = pd.read_csv(city_coordinates_file)
-    merged = new_games.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
+    merged = stam_df.merge(coords_df, left_on='Home Team', right_on='Team', how='left')
 
     api_rows = []
     for _, row in merged.iterrows():
         for off in get_weather_offsets(row['DateTime']):
             dt_req = row['DateTime'] + off
+            if dt_req > now:
+                continue
+            dt_req_str = dt_req.strftime("%A %d %B,%Y,%H:%M")
+            key = (row['MatchID'], row['Home Team ID'], row['Home Team'], row['City'], dt_req_str)
+            if key in existing_keys:
+                continue
             print(f"Hole Wetterdaten für Match {row['MatchID']} um {dt_req}")
             w = fetch_weather(row['Latitude'], row['Longitude'], dt_req)
             api_rows.append({
@@ -204,14 +209,15 @@ def query_api_data_by_match_id():
                 'Rain':            w.get('Rain'),
                 'Snow':            w.get('Snow')
             })
+            existing_keys.add(key)
 
     if api_rows:
         new_df = pd.DataFrame(api_rows)
         new_df['DateTime'] = new_df['DateTime'].dt.strftime("%A %d %B,%Y,%H:%M")
         new_df.to_csv(output_csv_file, mode='a', header=False, index=False)
-        print(f"{len(new_df)} neue Zeilen angehängt. Neue Max MatchID: {new_df['MatchID'].max()}")
+        print(f"{len(new_df)} neue Zeilen angehaengt.")
     else:
-        print("Keine neuen API-Daten abgerufen.")
+        print("Keine fehlenden API-Daten gefunden.")
 
 # ---------------------------
 # Aktualisierung: Letztes Jahr neu per API abrufen
