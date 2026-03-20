@@ -21,7 +21,7 @@ RUN_HISTORY_PATH = os.path.join(OUTPUT_PATH, 'surrogate_run_history.csv')
 PARETO_OUT_PATH = os.path.join(OUTPUT_PATH, 'pareto_front.csv')
 WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
 WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
-MAX_RUNS = 700
+MAX_RUNS = 20
 
 # === SURROGATE MODEL SWITCH ===
 # "gbr" = Gradient Boosting (recommended for now)
@@ -31,9 +31,9 @@ SURROGATE_MIN_HISTORY = 100
 SURROGATE_CANDIDATES = 300
 SURROGATE_RANDOM_FRACTION = 0.2
 
-# === H2H K SEARCH RANGE (integers only) ===
-H2H_K_RANGE = (1, 10)
-H2H_K_DEFAULT = 2
+# === H2H K SEARCH RANGE ===
+H2H_K_RANGE = (1.0, 10.0)
+H2H_K_DEFAULT = 2.0
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
@@ -463,7 +463,7 @@ def generate_candidate_df(num, features, k_range):
     rows = []
     for _ in range(num):
         row = {f'Weight_{feat}': random.random() * 2.0 for feat in features}
-        row['H2H_K'] = random.randint(int(k_range[0]), int(k_range[1]))
+        row['H2H_K'] = random.uniform(k_range[0], k_range[1])
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -512,7 +512,7 @@ if predict_df.empty:
     print("Keine ungespielten Spiele gefunden. Leere Ergebnis-Tabelle:")
     print(pred_df.head(9))
 else:
-    X_train_base = X_train.copy()
+    X_train_base = train_df[features].copy()
     X_pred_base = predict_df[features].copy()
 
     draw_margin = 0.5
@@ -561,7 +561,7 @@ else:
 
     for idx, cand in selected_df.iterrows():
         run_id = idx + 1
-        run_k = int(cand['H2H_K'])
+        run_k = float(cand['H2H_K'])
         weights = {feat: float(cand[f'Weight_{feat}']) for feat in features}
         weight_vec = pd.Series(weights, index=features).values
 
