@@ -12,7 +12,6 @@ from apscheduler.triggers.cron import CronTrigger
 stammdaten_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
 city_coordinates_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
 output_csv_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/future_weather_data_78.csv"
-history_csv_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/future_weather_data_78_history.csv"
 
 OUTPUT_COLUMNS = [
     "MatchID",
@@ -238,26 +237,15 @@ def main():
     out = out.drop_duplicates(subset=["MatchID", "Home Team ID", "Home Team", "City", "DateTime"])
     out["DateTime"] = out["DateTime"].dt.strftime("%A %d %B,%Y,%H:%M")
 
-    if os.path.exists(history_csv_file):
-        history_df = pd.read_csv(history_csv_file, dtype={"MatchID": int})
-    elif os.path.exists(output_csv_file):
-        history_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
-        os.makedirs(os.path.dirname(history_csv_file), exist_ok=True)
-        history_df.to_csv(history_csv_file, index=False)
-        print("History-CSV aus bestehender Output-CSV initialisiert:", history_csv_file)
+    if os.path.exists(output_csv_file):
+        existing_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
     else:
-        history_df = pd.DataFrame(columns=OUTPUT_COLUMNS)
-        os.makedirs(os.path.dirname(history_csv_file), exist_ok=True)
-        history_df.to_csv(history_csv_file, index=False)
-        print("Leere History-CSV erstellt:", history_csv_file)
+        existing_df = pd.DataFrame(columns=OUTPUT_COLUMNS)
     key_cols = ["MatchID", "Home Team ID", "Home Team", "City", "DateTime"]
-    merged = out.merge(history_df[key_cols], on=key_cols, how="left", indicator=True)
+    merged = out.merge(existing_df[key_cols], on=key_cols, how="left", indicator=True)
     new_out = merged[merged["_merge"] == "left_only"][out.columns]
 
     _write_output_csv(new_out)
-    if not new_out.empty:
-        new_out.to_csv(history_csv_file, mode="a", header=False, index=False)
-        print(f"{len(new_out)} neue Forecast-Zeilen an History angehaengt: {history_csv_file}")
 
 # ---------------------------
 # Scheduler helper: Run only on full hours that match current games
