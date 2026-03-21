@@ -26,7 +26,7 @@ MAX_RUNS = 20
 # === PREDICTION TARGET SWITCH ===
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
-PREDICTION_MODE = 'reference'
+PREDICTION_MODE = 'future'
 REFERENCE_PREDICTION_LIMIT = None
 
 # === SURROGATE MODEL SWITCH ===
