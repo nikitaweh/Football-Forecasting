@@ -175,8 +175,11 @@ def _extract_weather(entry, source):
 def _write_output_csv(df):
     os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
     if df.empty:
-        pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(output_csv_file, index=False)
-        print("Keine neuen Forecast-Zeilen. Output-CSV geleert:", output_csv_file)
+        if os.path.exists(output_csv_file):
+            print("Keine neuen Forecast-Zeilen. Bestehende Output-CSV bleibt unveraendert:", output_csv_file)
+        else:
+            pd.DataFrame(columns=OUTPUT_COLUMNS).to_csv(output_csv_file, index=False)
+            print("Keine neuen Forecast-Zeilen. Leere Output-CSV erstellt:", output_csv_file)
     else:
         df.to_csv(output_csv_file, index=False)
         print(f"{len(df)} neue Forecast-Zeilen geschrieben: {output_csv_file}")

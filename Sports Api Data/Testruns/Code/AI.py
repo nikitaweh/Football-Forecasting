@@ -23,6 +23,12 @@ WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
 WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
 MAX_RUNS = 20
 
+# === PREDICTION TARGET SWITCH ===
+# "future"    = predict next unplayed matches
+# "reference" = predict matches from match_results_references.csv for debugging/evaluation
+PREDICTION_MODE = 'reference'
+REFERENCE_PREDICTION_LIMIT = None
+
 # === SURROGATE MODEL SWITCH ===
 # "gbr" = Gradient Boosting (recommended for now)
 # "nn"  = Neural Network surrogate (use when you have much more data)
@@ -30,10 +36,11 @@ SURROGATE_MODEL = 'gbr'
 SURROGATE_MIN_HISTORY = 100
 SURROGATE_CANDIDATES = 300
 SURROGATE_RANDOM_FRACTION = 0.2
+PARETO_TARGET_SIZE = 20
 
 # === H2H K SEARCH RANGE ===
-H2H_K_RANGE = (1.0, 10.0)
-H2H_K_DEFAULT = 2.0
+H2H_K_RANGE = (1, 10)
+H2H_K_DEFAULT = 2
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
@@ -331,7 +338,7 @@ train_df   = df[df['Played'] == True].copy()
 predict_df = df[df['Played'] == False].copy()
 
 # --- Nur die nächsten 9 ungespielten Spiele nach Datum ---
-if not predict_df.empty:
+if PREDICTION_MODE == 'future' and not predict_df.empty:
     predict_df['MatchDate'] = pd.to_datetime(predict_df['MatchDate'], errors='coerce')
     predict_df = predict_df.sort_values('MatchDate').head(9).copy()
     print(f"Nächste ungespielte Spiele (bis zu 9): {len(predict_df)}")
@@ -416,6 +423,39 @@ def load_reference_results(primary_path, fallback_path=None):
         return ref.set_index('MatchID')
     return None
 
+def build_prediction_frame(df_src, ref_results, mode, future_limit=9, reference_limit=None):
+    if mode == 'reference':
+        if ref_results is None or ref_results.empty:
+            raise ValueError(
+                "PREDICTION_MODE='reference' requires match_results_references.csv "
+                "with valid MatchID, HomeGoals, and AwayGoals rows."
+            )
+        ref_ids = pd.Index(ref_results.index)
+        pred = df_src[df_src['MatchID'].isin(ref_ids)].copy()
+        if pred.empty:
+            raise ValueError(
+                "No MatchIDs from match_results_references.csv were found in the main dataset."
+            )
+        pred['MatchDate'] = pd.to_datetime(pred['MatchDate'], errors='coerce')
+        pred = pred.sort_values('MatchDate').copy()
+        if reference_limit is not None:
+            pred = pred.head(int(reference_limit)).copy()
+        missing_ids = sorted(set(ref_ids.tolist()) - set(pred['MatchID'].tolist()))
+        if missing_ids:
+            print(f"Reference mode: {len(missing_ids)} MatchIDs from the reference file were not found in the dataset.")
+        print(f"Referenzspiele fuer Debugging/Training: {len(pred)}")
+        return pred
+
+    if mode != 'future':
+        raise ValueError("PREDICTION_MODE must be either 'future' or 'reference'.")
+
+    pred = df_src[df_src['Played'] == False].copy()
+    if not pred.empty:
+        pred['MatchDate'] = pd.to_datetime(pred['MatchDate'], errors='coerce')
+        pred = pred.sort_values('MatchDate').head(future_limit).copy()
+    print(f"Naechste ungespielte Spiele (bis zu {future_limit}): {len(pred)}")
+    return pred
+
 def compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy'):
     base = df.dropna(subset=[nll_col, acc_col]).copy()
     if base.empty:
@@ -428,6 +468,50 @@ def compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy'):
             pareto_rows.append(row)
             best_acc = row[acc_col]
     return pd.DataFrame(pareto_rows)
+
+def build_pareto_decision_set(df, target_size=PARETO_TARGET_SIZE):
+    strict = compute_pareto_front(df)
+    if strict.empty:
+        return strict
+
+    ranked = df.copy()
+    if 'Pred_AvgNLL' not in ranked.columns:
+        ranked['Pred_AvgNLL'] = float('nan')
+    if 'Pred_Accuracy' not in ranked.columns:
+        ranked['Pred_Accuracy'] = float('nan')
+    ranked['AvgNLL'] = pd.to_numeric(ranked['AvgNLL'], errors='coerce')
+    ranked['Accuracy'] = pd.to_numeric(ranked['Accuracy'], errors='coerce')
+    ranked['Pred_AvgNLL'] = pd.to_numeric(ranked['Pred_AvgNLL'], errors='coerce')
+    ranked['Pred_Accuracy'] = pd.to_numeric(ranked['Pred_Accuracy'], errors='coerce')
+    ranked['Ranking_AvgNLL'] = ranked['AvgNLL'].combine_first(ranked['Pred_AvgNLL'])
+    ranked['Ranking_Accuracy'] = ranked['Accuracy'].combine_first(ranked['Pred_Accuracy'])
+    ranked = ranked.dropna(subset=['Ranking_AvgNLL', 'Ranking_Accuracy']).copy()
+    if ranked.empty:
+        out = strict.copy()
+        out['IsStrictPareto'] = True
+        return out
+
+    ranked = ranked.sort_values(
+        ['Ranking_AvgNLL', 'Ranking_Accuracy'],
+        ascending=[True, False]
+    )
+    strict_ids = set(strict.index.tolist())
+    decision = strict.copy()
+    decision['IsStrictPareto'] = True
+
+    if len(decision) < target_size:
+        fillers = ranked.loc[~ranked.index.isin(strict_ids)].head(target_size - len(decision)).copy()
+        if not fillers.empty:
+            fillers['IsStrictPareto'] = False
+            decision = pd.concat([decision, fillers], ignore_index=False)
+
+    decision = decision.sort_values(
+        ['IsStrictPareto', 'Ranking_AvgNLL', 'Ranking_Accuracy'],
+        ascending=[False, True, False]
+    ).head(target_size)
+    decision = decision.reset_index(drop=True)
+    decision['DecisionRank'] = range(1, len(decision) + 1)
+    return decision
 
 def load_run_history(path, weight_cols):
     if not os.path.exists(path):
@@ -463,7 +547,7 @@ def generate_candidate_df(num, features, k_range):
     rows = []
     for _ in range(num):
         row = {f'Weight_{feat}': random.random() * 2.0 for feat in features}
-        row['H2H_K'] = random.uniform(k_range[0], k_range[1])
+        row['H2H_K'] = random.randint(int(k_range[0]), int(k_range[1]))
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -491,13 +575,31 @@ def select_candidates_with_surrogate(candidates_df, pred_nll, pred_acc, max_runs
 
     return selected.reset_index(drop=True)
 
-# 7a. Train/Test
+# 8. Trainieren (pro Run, nach H2H-Skalierung)
+ref_results = load_reference_results(RESULTS_PATH, FALLBACK_RESULTS_PATH)
+
+predict_df = build_prediction_frame(
+    df,
+    ref_results,
+    PREDICTION_MODE,
+    future_limit=9,
+    reference_limit=REFERENCE_PREDICTION_LIMIT
+)
+
+train_df = df[df['Played'] == True].copy()
+if PREDICTION_MODE == 'reference':
+    train_df = train_df[~train_df['MatchID'].isin(predict_df['MatchID'])].copy()
+    print(f"Trainingsspiele nach Ausschluss der Referenzspiele: {len(train_df)}")
+
+train_df['GoalDiff'] = train_df['HomeGoals'] - train_df['AwayGoals']
+train_df = train_df[train_df['GoalDiff'].notna()].copy()
+if train_df.empty:
+    raise ValueError("Training dataset is empty after applying the selected prediction mode.")
+
 X_train, X_val, y_train, y_val = train_test_split(
     train_df[features], train_df['GoalDiff'], test_size=0.2, random_state=42
 )
 
-# 8. Trainieren (pro Run, nach H2H-Skalierung)
-ref_results = load_reference_results(RESULTS_PATH, FALLBACK_RESULTS_PATH)
 run_limit = MAX_RUNS if ref_results is not None else 1
 
 print("GoalDiff NaNs:", train_df['GoalDiff'].isna().sum())
@@ -512,7 +614,7 @@ if predict_df.empty:
     print("Keine ungespielten Spiele gefunden. Leere Ergebnis-Tabelle:")
     print(pred_df.head(9))
 else:
-    X_train_base = train_df[features].copy()
+    X_train_base = X_train.copy()
     X_pred_base = predict_df[features].copy()
 
     draw_margin = 0.5
@@ -561,12 +663,20 @@ else:
 
     for idx, cand in selected_df.iterrows():
         run_id = idx + 1
-        run_k = float(cand['H2H_K'])
+        run_k = int(cand['H2H_K'])
+        pred_run_nll = float(cand['Pred_AvgNLL']) if 'Pred_AvgNLL' in cand.index and pd.notna(cand['Pred_AvgNLL']) else float('nan')
+        pred_run_acc = float(cand['Pred_Accuracy']) if 'Pred_Accuracy' in cand.index and pd.notna(cand['Pred_Accuracy']) else float('nan')
         weights = {feat: float(cand[f'Weight_{feat}']) for feat in features}
         weight_vec = pd.Series(weights, index=features).values
 
         X_train_scaled = apply_h2h_scaling(X_train_base, run_k)
         X_pred_scaled = apply_h2h_scaling(X_pred_base, run_k)
+
+        if len(X_train_scaled) != len(y_train):
+            raise ValueError(
+                f"Training feature/target length mismatch: X_train_scaled={len(X_train_scaled)} "
+                f"vs y_train={len(y_train)}"
+            )
 
         imputer = SimpleImputer(strategy='median')
         X_train_imp = imputer.fit_transform(X_train_scaled)
@@ -615,6 +725,8 @@ else:
         pred_df['HomeTeam']  = predict_df['HomeTeam'].values
         pred_df['AwayTeam']  = predict_df['AwayTeam'].values
         pred_df['H2H_K'] = run_k
+        pred_df['PredictedResult'] = pred_df[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
+        pred_df['PredictedResult'] = pred_df['PredictedResult'].map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
 
         if 'H2H_Combined_MatchCount' in predict_df.columns:
             pred_df['H2H_Combined_MatchCount'] = predict_df['H2H_Combined_MatchCount'].values
@@ -645,6 +757,7 @@ else:
         run_score = None
         run_accuracy = None
         run_count = 0
+        matched_reference_count = 0
         early_stop = False
         if ref_results is not None:
             merged = pred_df.merge(
@@ -669,16 +782,21 @@ else:
 
             merged['ProbActual'] = merged.apply(prob_for_actual, axis=1)
             merged['ProbActual'] = merged['ProbActual'].clip(lower=1e-12)
+            merged['MatchNLL'] = merged['ProbActual'].apply(lambda p: -math.log(p) if pd.notna(p) else float('nan'))
+            merged['IsCorrect'] = (
+                merged['PredictedResult'].notna()
+                & merged['ActualResult'].notna()
+                & (merged['PredictedResult'] == merged['ActualResult'])
+            )
             valid_probs = merged['ProbActual'].dropna()
             if not valid_probs.empty:
                 run_score = float((-valid_probs.apply(math.log)).mean())
             pred_df = merged
 
             actual_rows = merged['ActualResult'].dropna()
+            matched_reference_count = int(actual_rows.count())
             if not actual_rows.empty:
-                predicted = merged[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
-                predicted = predicted.map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
-                correct_mask = (predicted[actual_rows.index] == actual_rows)
+                correct_mask = (merged.loc[actual_rows.index, 'PredictedResult'] == actual_rows)
                 run_accuracy = float(correct_mask.mean())
                 run_count = int(correct_mask.count())
                 all_correct = correct_mask.all()
@@ -692,13 +810,36 @@ else:
                 best_score = run_score
                 best_run = run_id
 
+        resolved_run_nll = run_score if run_score is not None else pred_run_nll
+        resolved_run_accuracy = run_accuracy if run_accuracy is not None else pred_run_acc
+        if matched_reference_count > 0:
+            metric_source = 'reference'
+        elif pd.notna(pred_run_nll) or pd.notna(pred_run_acc):
+            metric_source = 'surrogate'
+        else:
+            metric_source = 'none'
+
+        pred_df['RunResolvedAvgNLL'] = resolved_run_nll
+        pred_df['RunResolvedAccuracy'] = resolved_run_accuracy
+        pred_df['RunMetricSource'] = metric_source
+        pred_df['RunActualAvgNLL'] = run_score
+        pred_df['RunActualAccuracy'] = run_accuracy
+        pred_df['RunPredictedAvgNLL'] = pred_run_nll
+        pred_df['RunPredictedAccuracy'] = pred_run_acc
+
         metric_row = {
             'RunID': run_id,
             'BatchID': batch_id,
             'H2H_K': run_k,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
-            'NumMatchesScored': run_count
+            'NumMatchesScored': run_count,
+            'MatchedReferenceCount': matched_reference_count,
+            'Pred_AvgNLL': pred_run_nll,
+            'Pred_Accuracy': pred_run_acc,
+            'ResolvedAvgNLL': resolved_run_nll,
+            'ResolvedAccuracy': resolved_run_accuracy,
+            'MetricSource': metric_source
         }
         for feat in features:
             metric_row[f'Weight_{feat}'] = weights[feat]
@@ -717,12 +858,29 @@ else:
         print(f"Best run: {best_run} (avg NLL={best_score:.6f})")
     if run_metrics:
         summary_df = pd.DataFrame(run_metrics)
-        summary_df = summary_df.sort_values(['AvgNLL', 'Accuracy'], ascending=[True, False])
+        summary_df['AvgNLL'] = pd.to_numeric(summary_df['AvgNLL'], errors='coerce')
+        summary_df['Accuracy'] = pd.to_numeric(summary_df['Accuracy'], errors='coerce')
+        summary_df['Pred_AvgNLL'] = pd.to_numeric(summary_df['Pred_AvgNLL'], errors='coerce')
+        summary_df['Pred_Accuracy'] = pd.to_numeric(summary_df['Pred_Accuracy'], errors='coerce')
+        summary_df['ScoredAgainstReferences'] = summary_df['MatchedReferenceCount'] > 0
+        summary_df['Ranking_AvgNLL'] = summary_df['AvgNLL'].combine_first(summary_df['Pred_AvgNLL'])
+        summary_df['Ranking_Accuracy'] = summary_df['Accuracy'].combine_first(summary_df['Pred_Accuracy'])
+        summary_df['ResolvedAvgNLL'] = pd.to_numeric(summary_df['ResolvedAvgNLL'], errors='coerce')
+        summary_df['ResolvedAccuracy'] = pd.to_numeric(summary_df['ResolvedAccuracy'], errors='coerce')
+        summary_df = summary_df.sort_values(
+            ['ScoredAgainstReferences', 'Ranking_AvgNLL', 'Ranking_Accuracy'],
+            ascending=[False, True, False]
+        )
         summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
         print(summary_df.head(5))
 
-        history_updated = pd.concat([history_df, summary_df], ignore_index=True)
+        if history_df.empty:
+            history_updated = summary_df.copy()
+        else:
+            history_updated = pd.DataFrame.from_records(
+                history_df.to_dict('records') + summary_df.to_dict('records')
+            )
         history_updated.to_csv(RUN_HISTORY_PATH, index=False)
 
-        pareto_df = compute_pareto_front(history_updated)
+        pareto_df = build_pareto_decision_set(history_updated, PARETO_TARGET_SIZE)
         pareto_df.to_csv(PARETO_OUT_PATH, index=False)
