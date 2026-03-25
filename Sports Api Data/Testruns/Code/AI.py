@@ -12,15 +12,10 @@ from sklearn.preprocessing import StandardScaler
 
 # Pfad zum Datenordner anpassen
 DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'
-OUTPUT_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns/Datacollection'
-RESULTS_PATH = os.path.join(OUTPUT_PATH, 'match_results_references.csv')
-FALLBACK_RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
-PREDICTION_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_runs.csv')
-RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.csv')
-RUN_HISTORY_PATH = os.path.join(OUTPUT_PATH, 'surrogate_run_history.csv')
-PARETO_OUT_PATH = os.path.join(OUTPUT_PATH, 'pareto_front.csv')
+TESTRUNS_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns'
+FUTURE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection future')
+REFERENCE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection reference')
 WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
-WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
 MAX_RUNS = 20
 
 # === PREDICTION TARGET SWITCH ===
@@ -28,6 +23,29 @@ MAX_RUNS = 20
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
 PREDICTION_MODE = 'future'
 REFERENCE_PREDICTION_LIMIT = None
+
+if PREDICTION_MODE == 'future':
+    OUTPUT_PATH = FUTURE_OUTPUT_PATH
+    RESULTS_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'match_results_references.csv')
+    FALLBACK_RESULTS_PATH = None
+    DECISION_OUT_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'future_candidate_ranking.csv')
+    RUN_HISTORY_SOURCE_PATH = os.path.join(REFERENCE_OUTPUT_PATH, 'surrogate_run_history.csv')
+elif PREDICTION_MODE == 'reference':
+    OUTPUT_PATH = REFERENCE_OUTPUT_PATH
+    RESULTS_PATH = os.path.join(REFERENCE_OUTPUT_PATH, 'match_results_references.csv')
+    FALLBACK_RESULTS_PATH = os.path.join(DATA_PATH, 'match_results_references.csv')
+    DECISION_OUT_PATH = os.path.join(REFERENCE_OUTPUT_PATH, 'pareto_front.csv')
+    RUN_HISTORY_SOURCE_PATH = os.path.join(REFERENCE_OUTPUT_PATH, 'surrogate_run_history.csv')
+else:
+    raise ValueError("PREDICTION_MODE must be either 'future' or 'reference'.")
+
+os.makedirs(OUTPUT_PATH, exist_ok=True)
+PREDICTION_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_runs.csv')
+RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.csv')
+RUN_HISTORY_PATH = os.path.join(OUTPUT_PATH, 'surrogate_run_history.csv')
+PARETO_OUT_PATH = DECISION_OUT_PATH
+FUTURE_OUTCOME_TABLE_PATH = os.path.join(OUTPUT_PATH, 'future_outcome_table.csv')
+WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
 
 # === SURROGATE MODEL SWITCH ===
 # "gbr" = Gradient Boosting (recommended for now)
@@ -338,7 +356,7 @@ train_df   = df[df['Played'] == True].copy()
 predict_df = df[df['Played'] == False].copy()
 
 # --- Nur die nächsten 9 ungespielten Spiele nach Datum ---
-if PREDICTION_MODE == 'future' and not predict_df.empty:
+if False and PREDICTION_MODE == 'future' and not predict_df.empty:
     predict_df['MatchDate'] = pd.to_datetime(predict_df['MatchDate'], errors='coerce')
     predict_df = predict_df.sort_values('MatchDate').head(9).copy()
     print(f"Nächste ungespielte Spiele (bis zu 9): {len(predict_df)}")
@@ -456,6 +474,63 @@ def build_prediction_frame(df_src, ref_results, mode, future_limit=9, reference_
     print(f"Naechste ungespielte Spiele (bis zu {future_limit}): {len(pred)}")
     return pred
 
+def mean_available(values, default_value=1.25):
+    valid = [float(v) for v in values if pd.notna(v)]
+    if not valid:
+        return float(default_value)
+    return float(sum(valid) / len(valid))
+
+def estimate_scoreline(match_row, predicted_goal_diff, predicted_result):
+    home_attack = mean_available([
+        match_row.get('Home_BaseAvgGoalsFor'),
+        match_row.get('Home_AvgGoalsFor_L5')
+    ], default_value=1.5)
+    away_defense = mean_available([
+        match_row.get('Away_BaseAvgGoalsAgainst'),
+        match_row.get('Away_AvgGoalsAgainst_L5')
+    ], default_value=1.4)
+    away_attack = mean_available([
+        match_row.get('Away_BaseAvgGoalsFor'),
+        match_row.get('Away_AvgGoalsFor_L5')
+    ], default_value=1.2)
+    home_defense = mean_available([
+        match_row.get('Home_BaseAvgGoalsAgainst'),
+        match_row.get('Home_AvgGoalsAgainst_L5')
+    ], default_value=1.3)
+
+    total_goals = max(0.2, mean_available([
+        (home_attack + away_defense) / 2.0,
+        (away_attack + home_defense) / 2.0
+    ], default_value=2.6) * 2.0)
+
+    exp_home = (total_goals + predicted_goal_diff) / 2.0
+    exp_away = total_goals - exp_home
+    if exp_home < 0:
+        exp_home = 0.0
+        exp_away = total_goals
+    if exp_away < 0:
+        exp_away = 0.0
+        exp_home = total_goals
+
+    pred_home_goals = int(round(exp_home))
+    pred_away_goals = int(round(exp_away))
+
+    if predicted_result == 'H' and pred_home_goals <= pred_away_goals:
+        pred_home_goals = pred_away_goals + 1
+    elif predicted_result == 'A' and pred_away_goals <= pred_home_goals:
+        pred_away_goals = pred_home_goals + 1
+    elif predicted_result == 'D' and pred_home_goals != pred_away_goals:
+        draw_goals = int(round((exp_home + exp_away) / 2.0))
+        pred_home_goals = draw_goals
+        pred_away_goals = draw_goals
+
+    return (
+        float(exp_home),
+        float(exp_away),
+        int(pred_home_goals),
+        int(pred_away_goals)
+    )
+
 def compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy'):
     base = df.dropna(subset=[nll_col, acc_col]).copy()
     if base.empty:
@@ -511,6 +586,114 @@ def build_pareto_decision_set(df, target_size=PARETO_TARGET_SIZE):
     ).head(target_size)
     decision = decision.reset_index(drop=True)
     decision['DecisionRank'] = range(1, len(decision) + 1)
+    return decision
+
+def rank_component(series, smaller_is_better=False):
+    values = pd.to_numeric(series, errors='coerce')
+    ranked = pd.Series(float('nan'), index=values.index, dtype='float64')
+    valid = values.notna()
+    if not valid.any():
+        return ranked
+    if smaller_is_better:
+        ranked.loc[valid] = values.loc[valid].rank(ascending=False, pct=True)
+    else:
+        ranked.loc[valid] = values.loc[valid].rank(ascending=True, pct=True)
+    return ranked
+
+def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
+    ranked = df.copy()
+    for col in [
+        'Pred_AvgNLL', 'Pred_Accuracy',
+        'MeanTopProb', 'MeanProbGap', 'MeanEntropy'
+    ]:
+        if col not in ranked.columns:
+            ranked[col] = float('nan')
+        ranked[col] = pd.to_numeric(ranked[col], errors='coerce')
+
+    ranked['HasSurrogateMetrics'] = (
+        ranked['Pred_AvgNLL'].notna() & ranked['Pred_Accuracy'].notna()
+    )
+    ranked['RecommendationSource'] = ranked['HasSurrogateMetrics'].map(
+        lambda has_surrogate: 'surrogate' if has_surrogate else 'confidence_fallback'
+    )
+
+    ranked['PredNLLComponent'] = rank_component(ranked['Pred_AvgNLL'], smaller_is_better=True)
+    ranked['PredAccuracyComponent'] = rank_component(ranked['Pred_Accuracy'], smaller_is_better=False)
+    ranked['ConfidenceComponent'] = rank_component(ranked['MeanTopProb'], smaller_is_better=False)
+    ranked['GapComponent'] = rank_component(ranked['MeanProbGap'], smaller_is_better=False)
+    ranked['EntropyComponent'] = rank_component(ranked['MeanEntropy'], smaller_is_better=True)
+
+    fallback_score = (
+        0.45 * ranked['ConfidenceComponent'].fillna(0.0)
+        + 0.35 * ranked['GapComponent'].fillna(0.0)
+        + 0.20 * ranked['EntropyComponent'].fillna(0.0)
+    )
+    surrogate_balanced = (
+        0.50 * ranked['PredNLLComponent'].fillna(0.0)
+        + 0.50 * ranked['PredAccuracyComponent'].fillna(0.0)
+    )
+    surrogate_conservative = (
+        0.70 * ranked['PredNLLComponent'].fillna(0.0)
+        + 0.20 * ranked['ConfidenceComponent'].fillna(0.0)
+        + 0.10 * ranked['EntropyComponent'].fillna(0.0)
+    )
+    surrogate_aggressive = (
+        0.70 * ranked['PredAccuracyComponent'].fillna(0.0)
+        + 0.20 * ranked['GapComponent'].fillna(0.0)
+        + 0.10 * ranked['ConfidenceComponent'].fillna(0.0)
+    )
+    fallback_conservative = (
+        0.60 * ranked['ConfidenceComponent'].fillna(0.0)
+        + 0.40 * ranked['EntropyComponent'].fillna(0.0)
+    )
+    fallback_aggressive = (
+        0.60 * ranked['GapComponent'].fillna(0.0)
+        + 0.40 * ranked['ConfidenceComponent'].fillna(0.0)
+    )
+
+    ranked['BalancedScore'] = fallback_score
+    ranked['ConservativeScore'] = fallback_conservative
+    ranked['AggressiveScore'] = fallback_aggressive
+
+    has_surrogate = ranked['HasSurrogateMetrics']
+    ranked.loc[has_surrogate, 'BalancedScore'] = surrogate_balanced.loc[has_surrogate]
+    ranked.loc[has_surrogate, 'ConservativeScore'] = surrogate_conservative.loc[has_surrogate]
+    ranked.loc[has_surrogate, 'AggressiveScore'] = surrogate_aggressive.loc[has_surrogate]
+
+    ranked = ranked.sort_values(
+        ['BalancedScore', 'ConservativeScore', 'AggressiveScore'],
+        ascending=[False, False, False]
+    ).copy()
+    if ranked.empty:
+        return ranked
+
+    balanced_pick = ranked.sort_values('BalancedScore', ascending=False).head(1).copy()
+    conservative_pick = ranked.sort_values('ConservativeScore', ascending=False).head(1).copy()
+    aggressive_pick = ranked.sort_values('AggressiveScore', ascending=False).head(1).copy()
+
+    decision = pd.concat([balanced_pick, conservative_pick, aggressive_pick, ranked], ignore_index=False)
+    decision = decision.drop_duplicates(subset=['RunID']).head(target_size).copy()
+    decision = decision.reset_index(drop=True)
+    decision['DecisionRank'] = range(1, len(decision) + 1)
+
+    balanced_run_id = balanced_pick['RunID'].iloc[0]
+    conservative_run_id = conservative_pick['RunID'].iloc[0]
+    aggressive_run_id = aggressive_pick['RunID'].iloc[0]
+    decision['IsBalancedRecommendation'] = decision['RunID'] == balanced_run_id
+    decision['IsConservativeRecommendation'] = decision['RunID'] == conservative_run_id
+    decision['IsAggressiveRecommendation'] = decision['RunID'] == aggressive_run_id
+
+    def recommendation_label(row):
+        labels = []
+        if row['IsBalancedRecommendation']:
+            labels.append('Balanced')
+        if row['IsConservativeRecommendation']:
+            labels.append('Conservative')
+        if row['IsAggressiveRecommendation']:
+            labels.append('Aggressive')
+        return ', '.join(labels) if labels else 'Candidate'
+
+    decision['RecommendationLabel'] = decision.apply(recommendation_label, axis=1)
     return decision
 
 def load_run_history(path, weight_cols):
@@ -577,6 +760,9 @@ def select_candidates_with_surrogate(candidates_df, pred_nll, pred_acc, max_runs
 
 # 8. Trainieren (pro Run, nach H2H-Skalierung)
 ref_results = load_reference_results(RESULTS_PATH, FALLBACK_RESULTS_PATH)
+print(f"Prediction mode: {PREDICTION_MODE}")
+print(f"Output path: {OUTPUT_PATH}")
+print(f"Surrogate history source: {RUN_HISTORY_SOURCE_PATH}")
 
 predict_df = build_prediction_frame(
     df,
@@ -600,11 +786,11 @@ X_train, X_val, y_train, y_val = train_test_split(
     train_df[features], train_df['GoalDiff'], test_size=0.2, random_state=42
 )
 
-run_limit = MAX_RUNS if ref_results is not None else 1
+run_limit = MAX_RUNS if (PREDICTION_MODE == 'future' or ref_results is not None) else 1
 
 print("GoalDiff NaNs:", train_df['GoalDiff'].isna().sum())
 print("X_train NaNs (raw):", X_train.isna().sum().sum())
-if ref_results is None:
+if PREDICTION_MODE == 'reference' and ref_results is None:
     print(f"Reference results not found at {RESULTS_PATH} (or fallback {FALLBACK_RESULTS_PATH}); running only 1 weight set.")
 
 
@@ -634,7 +820,7 @@ else:
     best_score = None
     best_run = None
 
-    history_df = load_run_history(RUN_HISTORY_PATH, weight_cols)
+    history_df = load_run_history(RUN_HISTORY_SOURCE_PATH, weight_cols)
     use_surrogate = len(history_df) >= SURROGATE_MIN_HISTORY
 
     if use_surrogate:
@@ -725,8 +911,23 @@ else:
         pred_df['HomeTeam']  = predict_df['HomeTeam'].values
         pred_df['AwayTeam']  = predict_df['AwayTeam'].values
         pred_df['H2H_K'] = run_k
+        pred_df['PredictedGoalDiff'] = preds
         pred_df['PredictedResult'] = pred_df[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
         pred_df['PredictedResult'] = pred_df['PredictedResult'].map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
+
+        score_estimates = [
+            estimate_scoreline(predict_df.loc[idx], pred_df.at[idx, 'PredictedGoalDiff'], pred_df.at[idx, 'PredictedResult'])
+            for idx in pred_df.index
+        ]
+        pred_df['ExpectedHomeGoals'] = [row[0] for row in score_estimates]
+        pred_df['ExpectedAwayGoals'] = [row[1] for row in score_estimates]
+        pred_df['PredictedHomeGoals'] = [row[2] for row in score_estimates]
+        pred_df['PredictedAwayGoals'] = [row[3] for row in score_estimates]
+        pred_df['PredictedScoreline'] = (
+            pred_df['PredictedHomeGoals'].astype(int).astype(str)
+            + '-'
+            + pred_df['PredictedAwayGoals'].astype(int).astype(str)
+        )
 
         if 'H2H_Combined_MatchCount' in predict_df.columns:
             pred_df['H2H_Combined_MatchCount'] = predict_df['H2H_Combined_MatchCount'].values
@@ -810,6 +1011,24 @@ else:
                 best_score = run_score
                 best_run = run_id
 
+        prob_frame = pred_df[['WinProb', 'DrawProb', 'LoseProb']].apply(pd.to_numeric, errors='coerce')
+        top_prob = prob_frame.max(axis=1)
+        second_prob = prob_frame.apply(
+            lambda row: row.nlargest(2).iloc[-1] if row.notna().sum() >= 2 else float('nan'),
+            axis=1
+        )
+        prob_gap = top_prob - second_prob
+        prob_entropy = prob_frame.apply(
+            lambda row: -sum(
+                p * math.log(max(p, 1e-12))
+                for p in row.dropna()
+            ) if row.notna().any() else float('nan'),
+            axis=1
+        )
+        mean_top_prob = float(top_prob.mean()) if not top_prob.dropna().empty else float('nan')
+        mean_prob_gap = float(prob_gap.mean()) if not prob_gap.dropna().empty else float('nan')
+        mean_entropy = float(prob_entropy.mean()) if not prob_entropy.dropna().empty else float('nan')
+
         resolved_run_nll = run_score if run_score is not None else pred_run_nll
         resolved_run_accuracy = run_accuracy if run_accuracy is not None else pred_run_acc
         if matched_reference_count > 0:
@@ -839,7 +1058,10 @@ else:
             'Pred_Accuracy': pred_run_acc,
             'ResolvedAvgNLL': resolved_run_nll,
             'ResolvedAccuracy': resolved_run_accuracy,
-            'MetricSource': metric_source
+            'MetricSource': metric_source,
+            'MeanTopProb': mean_top_prob,
+            'MeanProbGap': mean_prob_gap,
+            'MeanEntropy': mean_entropy
         }
         for feat in features:
             metric_row[f'Weight_{feat}'] = weights[feat]
@@ -862,6 +1084,9 @@ else:
         summary_df['Accuracy'] = pd.to_numeric(summary_df['Accuracy'], errors='coerce')
         summary_df['Pred_AvgNLL'] = pd.to_numeric(summary_df['Pred_AvgNLL'], errors='coerce')
         summary_df['Pred_Accuracy'] = pd.to_numeric(summary_df['Pred_Accuracy'], errors='coerce')
+        summary_df['MeanTopProb'] = pd.to_numeric(summary_df['MeanTopProb'], errors='coerce')
+        summary_df['MeanProbGap'] = pd.to_numeric(summary_df['MeanProbGap'], errors='coerce')
+        summary_df['MeanEntropy'] = pd.to_numeric(summary_df['MeanEntropy'], errors='coerce')
         summary_df['ScoredAgainstReferences'] = summary_df['MatchedReferenceCount'] > 0
         summary_df['Ranking_AvgNLL'] = summary_df['AvgNLL'].combine_first(summary_df['Pred_AvgNLL'])
         summary_df['Ranking_Accuracy'] = summary_df['Accuracy'].combine_first(summary_df['Pred_Accuracy'])
@@ -874,13 +1099,56 @@ else:
         summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
         print(summary_df.head(5))
 
-        if history_df.empty:
+        if os.path.exists(RUN_HISTORY_PATH):
+            try:
+                existing_mode_history = pd.read_csv(RUN_HISTORY_PATH)
+            except pd.errors.EmptyDataError:
+                existing_mode_history = pd.DataFrame()
+        else:
+            existing_mode_history = pd.DataFrame()
+
+        if existing_mode_history.empty:
             history_updated = summary_df.copy()
         else:
             history_updated = pd.DataFrame.from_records(
-                history_df.to_dict('records') + summary_df.to_dict('records')
+                existing_mode_history.to_dict('records') + summary_df.to_dict('records')
             )
         history_updated.to_csv(RUN_HISTORY_PATH, index=False)
 
-        pareto_df = build_pareto_decision_set(history_updated, PARETO_TARGET_SIZE)
-        pareto_df.to_csv(PARETO_OUT_PATH, index=False)
+        if PREDICTION_MODE == 'reference':
+            decision_df = build_pareto_decision_set(history_updated, PARETO_TARGET_SIZE)
+        else:
+            decision_df = build_future_candidate_ranking(summary_df, PARETO_TARGET_SIZE)
+        decision_df.to_csv(PARETO_OUT_PATH, index=False)
+        print(decision_df.head(5))
+
+        if PREDICTION_MODE == 'future' and not decision_df.empty:
+            balanced_choice = decision_df[decision_df['IsBalancedRecommendation']].head(1)
+            if balanced_choice.empty:
+                balanced_choice = decision_df.head(1)
+            selected_run_id = int(balanced_choice['RunID'].iloc[0])
+            selected_label = balanced_choice['RecommendationLabel'].iloc[0]
+
+            outcome_table = all_pred_df[all_pred_df['RunID'] == selected_run_id].copy()
+            outcome_table['MostLikelyOutcomeProbability'] = outcome_table[['WinProb', 'DrawProb', 'LoseProb']].max(axis=1)
+            outcome_table['MostLikelyOutcome'] = outcome_table['PredictedResult'].map({
+                'H': 'HomeWin',
+                'D': 'Draw',
+                'A': 'AwayWin'
+            })
+            outcome_table['RecommendedRunID'] = selected_run_id
+            outcome_table['RecommendationLabel'] = selected_label
+
+            final_cols = [
+                'MatchID', 'MatchDate', 'HomeTeam', 'AwayTeam',
+                'RecommendedRunID', 'RecommendationLabel',
+                'WinProb', 'DrawProb', 'LoseProb',
+                'MostLikelyOutcome', 'MostLikelyOutcomeProbability',
+                'PredictedGoalDiff',
+                'ExpectedHomeGoals', 'ExpectedAwayGoals',
+                'PredictedHomeGoals', 'PredictedAwayGoals',
+                'PredictedScoreline', 'H2H_K'
+            ]
+            outcome_table = outcome_table[final_cols].sort_values('MatchDate')
+            outcome_table.to_csv(FUTURE_OUTCOME_TABLE_PATH, index=False)
+            print(outcome_table.head(10))
