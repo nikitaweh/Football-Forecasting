@@ -1,3 +1,30 @@
+"""
+Model overview
+==============
+
+This script predicts football match outcomes with the following pipeline:
+
+1. Build pre-match features from historical team strength, rolling last-5 form,
+   head-to-head metrics, match stats, and weather data.
+2. Sample one weight per feature plus one integer H2H reliability parameter k.
+3. Scale H2H features with alpha = MatchCount / (MatchCount + k).
+4. Median-impute missing values and multiply each feature column by its sampled weight.
+5. Train a BART model on historical GoalDiff = HomeGoals - AwayGoals.
+6. Convert the predicted goal difference mu into class probabilities using a
+   normal approximation with residual standard deviation sigma:
+      WinProb  = 1 - Phi((0.5 - mu) / sigma)
+      DrawProb = Phi((0.5 - mu) / sigma) - Phi((-0.5 - mu) / sigma)
+      LoseProb = Phi((-0.5 - mu) / sigma)
+7. Derive a plausible scoreline from the predicted goal difference plus team
+   scoring/conceding baselines.
+8. In reference mode, evaluate with AvgNLL and Accuracy.
+9. In future mode, rank candidate runs with surrogate-estimated metrics or,
+   if unavailable, with probability-confidence fallback metrics.
+
+Full documentation:
+Sports Api Data/Testruns/Code/AI_MODEL_DOCUMENTATION.md
+"""
+
 import math
 import os
 import random
