@@ -99,6 +99,8 @@ PARETO_OUT_PATH = DECISION_OUT_PATH
 FUTURE_OUTCOME_TABLE_PATH = os.path.join(OUTPUT_PATH, 'future_outcome_table.csv')
 WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
 PREDICTED_MATCH_STATS_OUT_PATH = os.path.join(OUTPUT_PATH, 'predicted_match_stats.csv')
+FUTURE_PREDICTION_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_runs.csv')
+FUTURE_RUN_SUMMARY_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_run_summary.csv')
 
 # === SURROGATE MODEL SWITCH ===
 # "gbr" = Gradient Boosting (recommended for now)
@@ -518,6 +520,256 @@ def load_reference_results(primary_path, fallback_path=None):
             )
         return ref.set_index('MatchID')
     return None
+
+
+def read_optional_csv(path):
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
+
+
+def first_non_null_value(values, default_value=float('nan')):
+    for value in values:
+        if pd.notna(value):
+            return value
+    return default_value
+
+
+def outcome_from_goals(home_goals, away_goals):
+    if pd.isna(home_goals) or pd.isna(away_goals):
+        return float('nan')
+    if home_goals > away_goals:
+        return 'H'
+    if home_goals < away_goals:
+        return 'A'
+    return 'D'
+
+
+def prepare_run_summary(summary_df):
+    prepared = summary_df.copy()
+    if prepared.empty:
+        return prepared
+
+    numeric_cols = [
+        'AvgNLL', 'Accuracy', 'Pred_AvgNLL', 'Pred_Accuracy',
+        'ResolvedAvgNLL', 'ResolvedAccuracy',
+        'MeanTopProb', 'MeanProbGap', 'MeanEntropy',
+        'MatchedReferenceCount', 'NumMatchesScored', 'H2H_K', 'BatchID'
+    ]
+    for col in numeric_cols:
+        if col in prepared.columns:
+            prepared[col] = pd.to_numeric(prepared[col], errors='coerce')
+
+    if 'MatchedReferenceCount' in prepared.columns:
+        prepared['ScoredAgainstReferences'] = prepared['MatchedReferenceCount'].fillna(0) > 0
+    else:
+        prepared['ScoredAgainstReferences'] = False
+
+    pred_nll_col = prepared['Pred_AvgNLL'] if 'Pred_AvgNLL' in prepared.columns else pd.Series(float('nan'), index=prepared.index)
+    pred_acc_col = prepared['Pred_Accuracy'] if 'Pred_Accuracy' in prepared.columns else pd.Series(float('nan'), index=prepared.index)
+    prepared['Ranking_AvgNLL'] = prepared['AvgNLL'].combine_first(pred_nll_col)
+    prepared['Ranking_Accuracy'] = prepared['Accuracy'].combine_first(pred_acc_col)
+    prepared = prepared.sort_values(
+        ['ScoredAgainstReferences', 'Ranking_AvgNLL', 'Ranking_Accuracy'],
+        ascending=[False, True, False]
+    )
+    return prepared
+
+
+def append_to_run_history(history_path, summary_df):
+    existing_mode_history = read_optional_csv(history_path)
+    if not existing_mode_history.empty and 'MatchStatsMode' not in existing_mode_history.columns:
+        existing_mode_history['MatchStatsMode'] = 'actual'
+    if not existing_mode_history.empty and 'PredictionSource' not in existing_mode_history.columns:
+        existing_mode_history['PredictionSource'] = 'simulation'
+    if not existing_mode_history.empty and 'SourcePredictionMode' not in existing_mode_history.columns:
+        if 'PredictionMode' in existing_mode_history.columns:
+            existing_mode_history['SourcePredictionMode'] = existing_mode_history['PredictionMode']
+        else:
+            existing_mode_history['SourcePredictionMode'] = 'reference'
+
+    if existing_mode_history.empty:
+        history_updated = summary_df.copy()
+    else:
+        history_updated = pd.DataFrame.from_records(
+            existing_mode_history.to_dict('records') + summary_df.to_dict('records')
+        )
+
+    dedupe_cols = [col for col in ['PredictionSource', 'MatchStatsMode', 'BatchID', 'RunID'] if col in history_updated.columns]
+    if dedupe_cols:
+        history_updated = history_updated.drop_duplicates(subset=dedupe_cols, keep='last')
+
+    history_updated.to_csv(history_path, index=False)
+    return history_updated
+
+
+def try_backfill_reference_from_future(ref_results):
+    if ref_results is None or ref_results.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    future_runs = read_optional_csv(FUTURE_PREDICTION_SOURCE_PATH)
+    if future_runs.empty or 'MatchID' not in future_runs.columns or 'RunID' not in future_runs.columns:
+        return pd.DataFrame(), pd.DataFrame()
+
+    future_runs = future_runs.copy()
+    future_runs['MatchID'] = pd.to_numeric(future_runs['MatchID'], errors='coerce')
+    future_runs = future_runs.dropna(subset=['MatchID', 'RunID']).copy()
+    if future_runs.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    future_runs['MatchID'] = future_runs['MatchID'].astype(ref_results.index.dtype, copy=False)
+    matched_rows = future_runs[future_runs['MatchID'].isin(ref_results.index)].copy()
+    if matched_rows.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    if 'MatchStatsMode' not in matched_rows.columns:
+        matched_rows['MatchStatsMode'] = 'predicted'
+    if 'PredictionMode' not in matched_rows.columns:
+        matched_rows['PredictionMode'] = 'future'
+
+    future_summary = read_optional_csv(FUTURE_RUN_SUMMARY_SOURCE_PATH)
+    summary_merge_cols = ['RunID']
+    for col in ['BatchID', 'Pred_AvgNLL', 'Pred_Accuracy', 'MeanTopProb', 'MeanProbGap', 'MeanEntropy', 'H2H_K']:
+        if col in future_summary.columns and col not in matched_rows.columns:
+            summary_merge_cols.append(col)
+    if len(summary_merge_cols) > 1:
+        summary_meta = future_summary[summary_merge_cols].drop_duplicates(subset=['RunID'], keep='last')
+        matched_rows = matched_rows.merge(summary_meta, on='RunID', how='left')
+
+    ref_actual = ref_results[['HomeGoals', 'AwayGoals', 'Result']].rename(columns={
+        'HomeGoals': 'ActualHomeGoals',
+        'AwayGoals': 'ActualAwayGoals',
+        'Result': 'ActualResult'
+    })
+
+    scored_runs = []
+    summary_rows = []
+
+    for run_id, run_df in matched_rows.groupby('RunID', sort=True):
+        scored = run_df.copy()
+        source_prediction_mode = first_non_null_value(scored['PredictionMode'].tolist(), 'future')
+        match_stats_mode = first_non_null_value(scored['MatchStatsMode'].tolist(), 'predicted')
+        batch_id = first_non_null_value(scored['BatchID'].tolist() if 'BatchID' in scored.columns else [], 1)
+        h2h_k = first_non_null_value(scored['H2H_K'].tolist() if 'H2H_K' in scored.columns else [], H2H_K_DEFAULT)
+
+        scored = scored.merge(ref_actual, left_on='MatchID', right_index=True, how='left')
+        scored['ActualResult'] = scored['ActualResult'].where(
+            scored['ActualResult'].isin(['H', 'D', 'A']),
+            scored.apply(lambda row: outcome_from_goals(row['ActualHomeGoals'], row['ActualAwayGoals']), axis=1)
+        )
+
+        def prob_for_actual(row):
+            if row['ActualResult'] == 'H':
+                return row['WinProb']
+            if row['ActualResult'] == 'D':
+                return row['DrawProb']
+            if row['ActualResult'] == 'A':
+                return row['LoseProb']
+            return float('nan')
+
+        scored['ProbActual'] = scored.apply(prob_for_actual, axis=1)
+        scored['ProbActual'] = pd.to_numeric(scored['ProbActual'], errors='coerce').clip(lower=1e-12)
+        scored['MatchNLL'] = scored['ProbActual'].apply(lambda p: -math.log(p) if pd.notna(p) else float('nan'))
+        scored['IsCorrect'] = (
+            scored['PredictedResult'].notna()
+            & scored['ActualResult'].notna()
+            & (scored['PredictedResult'] == scored['ActualResult'])
+        )
+
+        actual_rows = scored['ActualResult'].dropna()
+        matched_reference_count = int(actual_rows.count())
+        run_score = float(scored.loc[actual_rows.index, 'MatchNLL'].mean()) if matched_reference_count > 0 else float('nan')
+        run_accuracy = float(scored.loc[actual_rows.index, 'IsCorrect'].mean()) if matched_reference_count > 0 else float('nan')
+        run_count = matched_reference_count
+
+        pred_run_nll = first_non_null_value(
+            (scored['RunPredictedAvgNLL'].tolist() if 'RunPredictedAvgNLL' in scored.columns else [])
+            + (scored['Pred_AvgNLL'].tolist() if 'Pred_AvgNLL' in scored.columns else []),
+            float('nan')
+        )
+        pred_run_acc = first_non_null_value(
+            (scored['RunPredictedAccuracy'].tolist() if 'RunPredictedAccuracy' in scored.columns else [])
+            + (scored['Pred_Accuracy'].tolist() if 'Pred_Accuracy' in scored.columns else []),
+            float('nan')
+        )
+
+        prob_frame = scored[['WinProb', 'DrawProb', 'LoseProb']].apply(pd.to_numeric, errors='coerce')
+        top_prob = prob_frame.max(axis=1)
+        second_prob = prob_frame.apply(
+            lambda row: row.nlargest(2).iloc[-1] if row.notna().sum() >= 2 else float('nan'),
+            axis=1
+        )
+        prob_gap = top_prob - second_prob
+        prob_entropy = prob_frame.apply(
+            lambda row: -sum(p * math.log(max(p, 1e-12)) for p in row.dropna()) if row.notna().any() else float('nan'),
+            axis=1
+        )
+
+        mean_top_prob = first_non_null_value(
+            scored['MeanTopProb'].tolist() if 'MeanTopProb' in scored.columns else [],
+            float(top_prob.mean()) if not top_prob.dropna().empty else float('nan')
+        )
+        mean_prob_gap = first_non_null_value(
+            scored['MeanProbGap'].tolist() if 'MeanProbGap' in scored.columns else [],
+            float(prob_gap.mean()) if not prob_gap.dropna().empty else float('nan')
+        )
+        mean_entropy = first_non_null_value(
+            scored['MeanEntropy'].tolist() if 'MeanEntropy' in scored.columns else [],
+            float(prob_entropy.mean()) if not prob_entropy.dropna().empty else float('nan')
+        )
+
+        resolved_run_nll = run_score if pd.notna(run_score) else pred_run_nll
+        resolved_run_accuracy = run_accuracy if pd.notna(run_accuracy) else pred_run_acc
+        metric_source = 'reference' if matched_reference_count > 0 else ('surrogate' if pd.notna(pred_run_nll) or pd.notna(pred_run_acc) else 'none')
+
+        scored['SourcePredictionMode'] = source_prediction_mode
+        scored['PredictionMode'] = 'reference'
+        scored['PredictionSource'] = 'future_backfill'
+        scored['MatchStatsMode'] = match_stats_mode
+        scored['RunResolvedAvgNLL'] = resolved_run_nll
+        scored['RunResolvedAccuracy'] = resolved_run_accuracy
+        scored['RunMetricSource'] = metric_source
+        scored['RunActualAvgNLL'] = run_score
+        scored['RunActualAccuracy'] = run_accuracy
+        scored['RunPredictedAvgNLL'] = pred_run_nll
+        scored['RunPredictedAccuracy'] = pred_run_acc
+
+        metric_row = {
+            'RunID': run_id,
+            'BatchID': batch_id,
+            'PredictionMode': 'reference',
+            'PredictionSource': 'future_backfill',
+            'SourcePredictionMode': source_prediction_mode,
+            'MatchStatsMode': match_stats_mode,
+            'H2H_K': h2h_k,
+            'AvgNLL': run_score,
+            'Accuracy': run_accuracy,
+            'NumMatchesScored': run_count,
+            'MatchedReferenceCount': matched_reference_count,
+            'Pred_AvgNLL': pred_run_nll,
+            'Pred_Accuracy': pred_run_acc,
+            'ResolvedAvgNLL': resolved_run_nll,
+            'ResolvedAccuracy': resolved_run_accuracy,
+            'MetricSource': metric_source,
+            'MeanTopProb': mean_top_prob,
+            'MeanProbGap': mean_prob_gap,
+            'MeanEntropy': mean_entropy
+        }
+        for col in [c for c in scored.columns if c.startswith('Weight_')]:
+            metric_row[col] = first_non_null_value(scored[col].tolist(), float('nan'))
+
+        summary_rows.append(metric_row)
+        scored_runs.append(scored)
+
+    if not scored_runs:
+        return pd.DataFrame(), pd.DataFrame()
+
+    all_pred_df = pd.concat(scored_runs, ignore_index=True)
+    summary_df = prepare_run_summary(pd.DataFrame(summary_rows))
+    return all_pred_df, summary_df
 
 def build_prediction_frame(df_src, ref_results, mode, future_limit=9, reference_limit=None):
     if mode == 'reference':
@@ -1006,6 +1258,47 @@ print(f"Match stats mode: {MATCH_STATS_MODE}")
 print(f"Output path: {OUTPUT_PATH}")
 print(f"Surrogate history source: {RUN_HISTORY_SOURCE_PATH}")
 
+if PREDICTION_MODE == 'reference':
+    backfill_pred_df, backfill_summary_df = try_backfill_reference_from_future(ref_results)
+    if not backfill_pred_df.empty:
+        matched_ids = sorted(backfill_pred_df['MatchID'].dropna().unique().tolist())
+        unresolved_ids = []
+        if ref_results is not None and not ref_results.empty:
+            unresolved_ids = sorted(set(ref_results.index.tolist()) - set(matched_ids))
+
+        print(
+            f"Reference mode: using backfilled future predictions for "
+            f"{len(matched_ids)} MatchIDs across {backfill_summary_df['RunID'].nunique()} saved runs."
+        )
+        if unresolved_ids:
+            print(
+                f"Reference mode: {len(unresolved_ids)} MatchIDs in match_results_references.csv "
+                f"had no matching saved future prediction and were skipped."
+            )
+
+        backfill_pred_df.to_csv(PREDICTION_OUT_PATH, index=False)
+        backfill_summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
+
+        display_cols = [col for col in [
+            'RunID', 'MatchID', 'MatchDate', 'HomeTeam', 'AwayTeam',
+            'PredictedResult', 'ActualResult', 'ProbActual', 'MatchNLL'
+        ] if col in backfill_pred_df.columns]
+        if display_cols:
+            print(backfill_pred_df[display_cols].head(10))
+        print(backfill_summary_df.head(5))
+
+        history_updated = append_to_run_history(RUN_HISTORY_PATH, backfill_summary_df)
+        backfill_modes = backfill_summary_df['MatchStatsMode'].dropna().unique().tolist()
+        if backfill_modes and 'MatchStatsMode' in history_updated.columns:
+            current_mode_history = history_updated[history_updated['MatchStatsMode'].isin(backfill_modes)].copy()
+        else:
+            current_mode_history = history_updated.copy()
+
+        decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
+        decision_df.to_csv(PARETO_OUT_PATH, index=False)
+        print(decision_df.head(5))
+        raise SystemExit(0)
+
 predict_df = build_prediction_frame(
     df,
     ref_results,
@@ -1164,6 +1457,8 @@ else:
         pred_df = pd.DataFrame(index=predict_df.index)
         pred_df['RunID'] = run_id
         pred_df['PredictionMode'] = PREDICTION_MODE
+        pred_df['PredictionSource'] = 'simulation'
+        pred_df['SourcePredictionMode'] = PREDICTION_MODE
         pred_df['MatchStatsMode'] = MATCH_STATS_MODE
         pred_df['WinProb'] = win_probs
         pred_df['DrawProb'] = draw_probs
@@ -1312,6 +1607,8 @@ else:
             'RunID': run_id,
             'BatchID': batch_id,
             'PredictionMode': PREDICTION_MODE,
+            'PredictionSource': 'simulation',
+            'SourcePredictionMode': PREDICTION_MODE,
             'MatchStatsMode': MATCH_STATS_MODE,
             'H2H_K': run_k,
             'AvgNLL': run_score,
@@ -1347,44 +1644,11 @@ else:
     if best_run is not None:
         print(f"Best run: {best_run} (avg NLL={best_score:.6f})")
     if run_metrics:
-        summary_df = pd.DataFrame(run_metrics)
-        summary_df['AvgNLL'] = pd.to_numeric(summary_df['AvgNLL'], errors='coerce')
-        summary_df['Accuracy'] = pd.to_numeric(summary_df['Accuracy'], errors='coerce')
-        summary_df['Pred_AvgNLL'] = pd.to_numeric(summary_df['Pred_AvgNLL'], errors='coerce')
-        summary_df['Pred_Accuracy'] = pd.to_numeric(summary_df['Pred_Accuracy'], errors='coerce')
-        summary_df['MeanTopProb'] = pd.to_numeric(summary_df['MeanTopProb'], errors='coerce')
-        summary_df['MeanProbGap'] = pd.to_numeric(summary_df['MeanProbGap'], errors='coerce')
-        summary_df['MeanEntropy'] = pd.to_numeric(summary_df['MeanEntropy'], errors='coerce')
-        summary_df['ScoredAgainstReferences'] = summary_df['MatchedReferenceCount'] > 0
-        summary_df['Ranking_AvgNLL'] = summary_df['AvgNLL'].combine_first(summary_df['Pred_AvgNLL'])
-        summary_df['Ranking_Accuracy'] = summary_df['Accuracy'].combine_first(summary_df['Pred_Accuracy'])
-        summary_df['ResolvedAvgNLL'] = pd.to_numeric(summary_df['ResolvedAvgNLL'], errors='coerce')
-        summary_df['ResolvedAccuracy'] = pd.to_numeric(summary_df['ResolvedAccuracy'], errors='coerce')
-        summary_df = summary_df.sort_values(
-            ['ScoredAgainstReferences', 'Ranking_AvgNLL', 'Ranking_Accuracy'],
-            ascending=[False, True, False]
-        )
+        summary_df = prepare_run_summary(pd.DataFrame(run_metrics))
         summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
         print(summary_df.head(5))
 
-        if os.path.exists(RUN_HISTORY_PATH):
-            try:
-                existing_mode_history = pd.read_csv(RUN_HISTORY_PATH)
-            except pd.errors.EmptyDataError:
-                existing_mode_history = pd.DataFrame()
-        else:
-            existing_mode_history = pd.DataFrame()
-
-        if not existing_mode_history.empty and 'MatchStatsMode' not in existing_mode_history.columns:
-            existing_mode_history['MatchStatsMode'] = 'actual'
-
-        if existing_mode_history.empty:
-            history_updated = summary_df.copy()
-        else:
-            history_updated = pd.DataFrame.from_records(
-                existing_mode_history.to_dict('records') + summary_df.to_dict('records')
-            )
-        history_updated.to_csv(RUN_HISTORY_PATH, index=False)
+        history_updated = append_to_run_history(RUN_HISTORY_PATH, summary_df)
 
         current_mode_history = history_updated.copy()
         if 'MatchStatsMode' in current_mode_history.columns:
