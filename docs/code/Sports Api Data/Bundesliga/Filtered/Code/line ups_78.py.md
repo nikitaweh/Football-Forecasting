@@ -1,47 +1,59 @@
-# `line ups_78.py`
+﻿# `line ups_78.py`
 
 Source: `Sports Api Data/Bundesliga/Filtered/Code/line ups_78.py`
 
 ## Überblick
-Konvertiert Lineups‑JSON (API‑Antworten) in eine flache CSV‑Tabelle mit Spielern (Startelf + Bank) pro Match. Kann beim direkten Start einmal ausführen und anschließend per APScheduler automatisch zu festen Zeiten laufen.
+
+Dieses Skript verarbeitet Aufstellungen und ueberfuehrt Quelldaten in ein analysierbares Ausgabeformat.
 
 ## Zweck / Responsibilities
-- Lädt Lineups aus `INPUT_JSON` und (optional) Fixtures aus `FIXTURES_JSON`.
-- Bestimmt Home/Away bevorzugt über Fixtures‑Mapping (Fixture‑ID → Home/Away‑Team‑ID), sonst Fallback über Listenindex.
-- Extrahiert Spieler‑Zeilen für `startXI` und `substitutes` inkl. Team/Coach/Formation.
-- Schreibt die CSV nach `OUTPUT_CSV`.
 
-## Konfiguration
-- `INPUT_JSON`: Lineups‑Quelle (JSON mit `response`).
-- `FIXTURES_JSON`: Fixtures‑Quelle (für robustes Home/Away‑Mapping).
-- `OUTPUT_CSV`: Ziel‑CSV.
-- `team_name_overrides`: Normalisiert einige Teamnamen (Achtung: aktuell teils Mojibake wie `MÃ¼nchen`).
+- Liest Quelldaten aus konfigurierten Eingabedateien oder Datenordnern ein.
+- Schreibt aufbereitete Ergebnisse in Projektdateien oder Zieltabellen.
+- Kann als geplanter Job ueber einen Scheduler ausgefuehrt werden.
+- Kapselt die Hauptlogik in wiederverwendbaren Funktionen fuer Parsing, Bereinigung oder Export.
 
-## Wichtige Funktionen (Signaturen)
-- `load_fixture_team_map()`: Lädt Fixtures und erzeugt `{fixture_id: {home, away}}`; bei Fehlern Rückgabe `{}` + Hinweislog.
-- `convert_lineups_to_csv()`: Hauptlogik für JSON‑Parsing, Zeilenbau und CSV‑Write.
-  - Nested Helper: `add_player_rows(entry, is_start, side)` (baut Zeilen für Startelf/Bank).
+## Wichtige Klassen/Funktionen
 
-## Inputs / Outputs & Side‑Effects
-**Inputs**:
-- `INPUT_JSON`: erwartet `data["response"]` als Liste; jeder Eintrag enthält `parameters.fixture` (oder `MatchID`/`fixture_id`) sowie `response` (Lineups pro Team).
-- `FIXTURES_JSON`: optional; wird genutzt, um die zwei Teams sicher Home/Away zuzuordnen.
+- `load_fixture_team_map()`: Laedt Eingabedaten und gibt die aufbereitete Struktur zurueck.
+- `convert_lineups_to_csv()`: Konvertiert Quelldaten in ein neues Ausgabeformat.
+- `add_player_rows(entry, is_start, side)`: Erfuellt einen zentralen Verarbeitungsschritt innerhalb des Moduls.
 
-**Output**:
-- `OUTPUT_CSV` mit Spalten:
-  - `MatchID`, `Home Team ID`, `Away Team ID`, `Team Name`, `Coach ID`, `Coach Name`, `Formation`,
-    `Player ID`, `Player Name`, `Pos`, `Grid`, `StartXI`
+## Inputs / Outputs & Side-effects
 
-**Side‑Effects**:
-- Legt Zielordner an (`os.makedirs(dirname(OUTPUT_CSV))`), schreibt CSV, loggt Status in `stdout`.
+**Inputs**
+- `INPUT_JSON`: `r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/lineups_league_78.json"`
+- `FIXTURES_JSON`: `r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/fixtures_league_78.json"`
+
+**Outputs**
+- `OUTPUT_CSV`: `r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/lineups_league_78.csv"`
+
+**Side-effects**
+- Schreibt Dateien im Projektverzeichnis oder aktualisiert bestehende Artefakte.
+- Kann als lang laufender Scheduler-Prozess gestartet werden.
+- Schreibt Laufzeit- und Fehlerhinweise auf ``stdout``.
+- Legt Zielordner bei Bedarf automatisch an.
+
+## Konfiguration / Env
+
+- Keine markanten Top-Level-Konfigurationskonstanten erkannt.
+- Keine offensichtliche Nutzung von Umgebungsvariablen erkannt.
+
+## Interne Abhaengigkeiten / Imports
+
+- `apscheduler.schedulers.blocking.BlockingScheduler`
+- `apscheduler.triggers.cron.CronTrigger`
+- `csv`
+- `datetime.datetime`
+- `json`
+- `os`
 
 ## Beispiel
-- Direkt ausführen: `python "Sports Api Data/Bundesliga/Filtered/Code/line ups_78.py"`
-  - Führt `convert_lineups_to_csv()` einmal aus und startet dann einen Scheduler:
-    - `CronTrigger(day_of_week="sat,sun,mon", hour="3", minute="0")` (Timezone: `Europe/Berlin`)
+
+- Typischer Aufruf: ``python "Sports Api Data/Bundesliga/Filtered/Code/line ups_78.py"``
 
 ## Edge Cases / Notes
-- Wenn `FIXTURES_JSON` fehlt/kaputt ist, wird Home/Away per Index (`lineups[0]`/`lineups[1]`) zugewiesen.
-- Bei unerwartetem JSON‑Format wird abgebrochen (mit Log).
-- Wenn ein Match keine ID hat oder weniger als zwei Teams liefert, wird es übersprungen.
+
+- Beim Direktstart kann das Skript nach der ersten Verarbeitung im Scheduler weiterlaufen.
+- Unerwartete oder leere Quelldateien fuehren typischerweise zu fruehen Fehlern oder leeren DataFrames oder Listen.
 
