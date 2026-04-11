@@ -59,7 +59,7 @@ random.seed(RANDOM_STATE)
 # === PREDICTION TARGET SWITCH ===
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
-PREDICTION_MODE = ''
+PREDICTION_MODE = 'reference'
 REFERENCE_PREDICTION_LIMIT = None
 
 # === MATCH STATS SWITCH ===
