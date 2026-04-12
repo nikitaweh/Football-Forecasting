@@ -52,7 +52,7 @@ TESTRUNS_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns'
 FUTURE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection future')
 REFERENCE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection reference')
 WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
-MAX_RUNS = 20
+MAX_RUNS = 350
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
 
