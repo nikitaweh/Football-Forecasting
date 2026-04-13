@@ -56,7 +56,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - `FUTURE_OUTPUT_PATH`: Ausgabeordner fuer Vorhersagen kommender Spiele.
 - `REFERENCE_OUTPUT_PATH`: Ausgabeordner fuer Referenzbewertungen.
 - `WEATHER_HIST_PATH`: historische Wetterdatei.
-- `MAX_RUNS = 20`: maximale Kandidatenlaeufe pro Skriptstart.
+- `MAX_RUNS = 350`: maximale Kandidatenlaeufe pro Skriptstart.
 - `RANDOM_STATE = 42`: Seed fuer Reproduzierbarkeit.
 - `PREDICTION_MODE = 'reference'`: aktueller Modus im Stand `HEAD`.
 - `MATCH_STATS_MODE = 'predicted' if PREDICTION_MODE == 'future' else 'actual'`: Standardlogik fuer Match-Stats.
@@ -240,4 +240,4 @@ Typischer Ablauf:
 
 ## Letzte beobachtete Aenderung
 
-Im aktuellen Commit wurde `PREDICTION_MODE` auf `reference` gesetzt. Dadurch liegt der Fokus dieses Skriptstands auf Debugging, Evaluation und dem Schreiben von `pareto_front.csv` im Referenz-Ausgabeordner statt auf produktiven Future-Vorhersagen.
+Im aktuellen Commit wurde `MAX_RUNS` von `20` auf `350` erhoeht. Dadurch durchsucht der Lauf deutlich mehr Gewichtungs- und `H2H_K`-Kandidaten pro Start, was die Chancen auf bessere Referenz- oder Future-Ergebnisse steigert, aber Laufzeit und Artefaktmenge spuerbar erhoeht.

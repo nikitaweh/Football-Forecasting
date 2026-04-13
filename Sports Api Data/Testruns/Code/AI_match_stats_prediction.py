@@ -37,6 +37,7 @@ Sports Api Data/Testruns/Code/AI_MATCH_STATS_PREDICTION_DOCUMENTATION.md
 import math
 import os
 import random
+from datetime import datetime
 import pandas as pd
 from bartpy.sklearnmodel import SklearnModel
 from sklearn.ensemble import GradientBoostingRegressor
@@ -101,6 +102,7 @@ WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
 PREDICTED_MATCH_STATS_OUT_PATH = os.path.join(OUTPUT_PATH, 'predicted_match_stats.csv')
 FUTURE_PREDICTION_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_runs.csv')
 FUTURE_RUN_SUMMARY_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_run_summary.csv')
+FUTURE_VS_REFERENCE_METRICS_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'future_vs_reference_metrics.csv')
 
 # === SURROGATE MODEL SWITCH ===
 # "gbr" = Gradient Boosting (recommended for now)
@@ -606,6 +608,70 @@ def append_to_run_history(history_path, summary_df):
     return history_updated
 
 
+
+
+def append_future_vs_reference_metrics(metrics_path, summary_df):
+    """Append a per-run evaluation snapshot when saved future predictions are scored
+    against reference results (AvgNLL/Accuracy). Creates the CSV if missing.
+
+    The CSV is stored in the future output folder so that future runs keep their
+    evaluation history close to the generated predictions.
+    """
+    if summary_df is None or summary_df.empty:
+        return read_optional_csv(metrics_path)
+
+    evaluation_ts = datetime.now().isoformat(timespec='seconds')
+    snapshot = summary_df.copy()
+    snapshot['EvaluationTimestamp'] = evaluation_ts
+    snapshot['EvaluationType'] = 'future_vs_reference'
+
+    if 'AvgNLL' in snapshot.columns and 'Pred_AvgNLL' in snapshot.columns:
+        snapshot['Delta_AvgNLL_vs_Pred'] = snapshot['AvgNLL'] - snapshot['Pred_AvgNLL']
+    if 'Accuracy' in snapshot.columns and 'Pred_Accuracy' in snapshot.columns:
+        snapshot['Delta_Accuracy_vs_Pred'] = snapshot['Accuracy'] - snapshot['Pred_Accuracy']
+    if 'ResolvedAvgNLL' in snapshot.columns and 'AvgNLL' in snapshot.columns:
+        snapshot['Delta_ResolvedAvgNLL_vs_Actual'] = snapshot['ResolvedAvgNLL'] - snapshot['AvgNLL']
+    if 'ResolvedAccuracy' in snapshot.columns and 'Accuracy' in snapshot.columns:
+        snapshot['Delta_ResolvedAccuracy_vs_Actual'] = snapshot['ResolvedAccuracy'] - snapshot['Accuracy']
+
+    if 'Ranking_AvgNLL' in snapshot.columns:
+        snapshot['EvalRank_AvgNLL'] = pd.to_numeric(snapshot['Ranking_AvgNLL'], errors='coerce').rank(method='min', ascending=True)
+    if 'Ranking_Accuracy' in snapshot.columns:
+        snapshot['EvalRank_Accuracy'] = pd.to_numeric(snapshot['Ranking_Accuracy'], errors='coerce').rank(method='min', ascending=False)
+    if {'EvalRank_AvgNLL', 'EvalRank_Accuracy'}.issubset(snapshot.columns):
+        a = snapshot['EvalRank_AvgNLL'].fillna(snapshot['EvalRank_AvgNLL'].max(skipna=True) + 1)
+        b = snapshot['EvalRank_Accuracy'].fillna(snapshot['EvalRank_Accuracy'].max(skipna=True) + 1)
+        snapshot['EvalRank_Combined'] = a + b
+        best = snapshot['EvalRank_Combined'].min(skipna=True)
+        snapshot['EvalIsBestCombined'] = snapshot['EvalRank_Combined'] == best
+
+    existing = read_optional_csv(metrics_path)
+    if existing.empty:
+        updated = snapshot
+    else:
+        updated = pd.concat([existing, snapshot], ignore_index=True, sort=False)
+
+    dedupe_cols = [c for c in [
+        'EvaluationTimestamp', 'EvaluationType',
+        'PredictionSource', 'SourcePredictionMode', 'MatchStatsMode',
+        'BatchID', 'RunID'
+    ] if c in updated.columns]
+    if dedupe_cols:
+        updated = updated.drop_duplicates(subset=dedupe_cols, keep='last')
+
+    sort_cols = [c for c in ['EvaluationTimestamp', 'EvalIsBestCombined', 'Ranking_AvgNLL', 'Ranking_Accuracy'] if c in updated.columns]
+    if sort_cols:
+        ascending = [False] * len(sort_cols)
+        if 'EvalIsBestCombined' in sort_cols:
+            ascending[sort_cols.index('EvalIsBestCombined')] = False
+        if 'Ranking_AvgNLL' in sort_cols:
+            ascending[sort_cols.index('Ranking_AvgNLL')] = True
+        if 'Ranking_Accuracy' in sort_cols:
+            ascending[sort_cols.index('Ranking_Accuracy')] = False
+        updated = updated.sort_values(sort_cols, ascending=ascending)
+
+    updated.to_csv(metrics_path, index=False)
+    return updated
 def try_backfill_reference_from_future(ref_results):
     if ref_results is None or ref_results.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -1278,6 +1344,18 @@ if PREDICTION_MODE == 'reference':
 
         backfill_pred_df.to_csv(PREDICTION_OUT_PATH, index=False)
         backfill_summary_df.to_csv(RUN_SUMMARY_OUT_PATH, index=False)
+        evaluation_history = append_future_vs_reference_metrics(FUTURE_VS_REFERENCE_METRICS_PATH, backfill_summary_df)
+        print(f"Updated future-vs-reference evaluation log: {FUTURE_VS_REFERENCE_METRICS_PATH}")
+        if not evaluation_history.empty:
+            eval_cols = [c for c in [
+                'EvaluationTimestamp', 'RunID', 'BatchID', 'MatchStatsMode',
+                'AvgNLL', 'Accuracy', 'Pred_AvgNLL', 'Pred_Accuracy',
+                'Delta_AvgNLL_vs_Pred', 'Delta_Accuracy_vs_Pred',
+                'EvalRank_Combined', 'EvalIsBestCombined'
+            ] if c in evaluation_history.columns]
+            if eval_cols:
+                print(evaluation_history[eval_cols].head(10))
+
 
         display_cols = [col for col in [
             'RunID', 'MatchID', 'MatchDate', 'HomeTeam', 'AwayTeam',
