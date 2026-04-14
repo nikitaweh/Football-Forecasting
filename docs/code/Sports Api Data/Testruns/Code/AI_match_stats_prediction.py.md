@@ -6,7 +6,7 @@ Source: `Sports Api Data/Testruns/Code/AI_match_stats_prediction.py`
 
 Dieses Modul ist die umfangreichste Vorhersage-Pipeline im Testruns-Bereich. Es kombiniert historische Match-Statistiken, Team-Staerken, Formkurven, Head-to-Head-Merkmale, Wetterdaten und optional prognostizierte Match-Stats, um fuer Bundesliga-Spiele Ergebniswahrscheinlichkeiten und plausible Scorelines zu erzeugen.
 
-Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features gebaut, danach wird entweder mit echten Match-Statistiken, mit vorab prognostizierten Match-Statistiken oder ganz ohne Match-Stats ein Outcome-Modell trainiert. Fuer jede Kandidaten-Konfiguration werden Feature-Gewichte, ein H2H-Zuverlaessigkeitsparameter und Bewertungsmetriken protokolliert.
+Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features gebaut, danach wird entweder mit echten Match-Statistiken, mit vorab prognostizierten Match-Statistiken oder ganz ohne Match-Stats ein Outcome-Modell trainiert. Fuer jede Kandidaten-Konfiguration werden Feature-Gewichte, ein H2H-Zuverlaessigkeitsparameter und Bewertungsmetriken protokolliert. Neu hinzugekommen ist ein eigener Persistenzpfad fuer den Vergleich bereits gespeicherter Future-Runs gegen spaeter bekannte Reference-Ergebnisse.
 
 ## Zweck / Responsibilities
 
@@ -24,6 +24,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - Leitet aus dem vorhergesagten GoalDiff Wahrscheinlichkeiten fuer `H`, `D` und `A` ab.
 - Schaetzt ein plausibles Endergebnis ueber offensive und defensive Team-Baselines.
 - Speichert Run-Historie, Pareto-Entscheidungssets, Kandidaten-Rankings und Ergebnisdateien.
+- Haengt Future-vs-Reference-Evaluations-Snapshots an eine eigene CSV-Historie an.
 
 ## Pipeline In Kurzform
 
@@ -48,6 +49,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - `weather_data.csv`: zusaetzliche Wetterdaten im jeweiligen Output-Ordner.
 - `match_results_references.csv`: Referenzziele fuer Evaluation im Reference-Modus.
 - `surrogate_run_history.csv`: Historie frueherer Laeufe fuer das Surrogate-Ranking.
+- `future_vs_reference_metrics.csv`: spaetere Bewertung gespeicherter Future-Runs gegen echte Reference-Ergebnisse.
 
 ## Wichtige Konstanten / Konfiguration
 
@@ -70,6 +72,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - `PARETO_TARGET_SIZE = 20`: Zielgroesse fuer Entscheidungstabellen.
 - `H2H_K_RANGE = (1, 10)`: Suchraum fuer die H2H-Abschwaechung.
 - `H2H_K_DEFAULT = 2`: Fallback fuer fehlende historische Werte.
+- `FUTURE_VS_REFERENCE_METRICS_PATH`: Evaluationshistorie fuer nachtraeglich gescorte Future-Runs.
 
 ## Feature-Gruppen
 
@@ -113,6 +116,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - `read_optional_csv(path)`: toleranter CSV-Leser fuer optionale Artefakte.
 - `prepare_run_summary(summary_df)`: bereitet Laufmetriken fuer Sortierung und Persistenz auf.
 - `append_to_run_history(history_path, summary_df)`: haengt neue Ergebnisse an die Run-Historie an und dedupliziert.
+- `append_future_vs_reference_metrics(metrics_path, summary_df)`: schreibt Backfill-Evaluationen mit Delta- und Ranking-Spalten in eine separate Future-Historie.
 - `try_backfill_reference_from_future(ref_results)`: nutzt bereits gespeicherte Future-Runs, um Referenzfaelle nachtraeglich zu scoren.
 
 ### Prediction- und Modelllogik
@@ -155,6 +159,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - `future_candidate_ranking.csv`: Kandidatenranking im Future-Modus.
 - `future_outcome_table.csv`: komprimierte Empfehlung fuer kommende Spiele.
 - `predicted_match_stats.csv`: prognostizierte Match-Statistiken im `predicted`-Modus.
+- `future_vs_reference_metrics.csv`: Snapshot-Historie fuer spaetere Ist-vs-Prognose-Auswertungen gespeicherter Future-Runs.
 
 ### Side Effects
 
@@ -184,6 +189,12 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - Output: angereicherte Frames, aktive Featureliste, optionales Export-DataFrame und Summary.
 - Besonderheit: entscheidet die gesamte weitere Modellarchitektur.
 
+### `append_future_vs_reference_metrics(metrics_path, summary_df)`
+
+- Input: Pfad zur Future-vs-Reference-Historie plus aggregierte Run-Summary eines Backfills.
+- Output: DataFrame der aktualisierten Evaluationshistorie mit Zeitstempel, Delta- und Ranking-Spalten.
+- Besonderheit: dedupliziert nach Evaluationszeitpunkt, Modus, Batch und Run und sortiert Bestkandidaten nach vorn.
+
 ### `estimate_scoreline(match_row, predicted_goal_diff, predicted_result)`
 
 - Input: Match-Merkmale plus Ergebnis des GoalDiff-Modells.
@@ -206,6 +217,7 @@ Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features
 - `math`: Normalverteilungsnahe CDF-Umrechnung und Logarithmen.
 - `os`: Pfadbau und Dateiexistenzpruefung.
 - `random`: Sampling fuer Feature-Gewichte und H2H-Kandidaten.
+- `datetime.datetime`: Zeitstempel fuer Future-vs-Reference-Evaluations-Snapshots.
 - `bartpy.sklearnmodel.SklearnModel`: Kernmodell fuer GoalDiff.
 - `sklearn.impute.SimpleImputer`: Median-Imputation.
 - `sklearn.model_selection.KFold`: OOF-Prognosen fuer Match-Stats.
@@ -240,4 +252,4 @@ Typischer Ablauf:
 
 ## Letzte beobachtete Aenderung
 
-Im aktuellen Commit wurde `MAX_RUNS` von `20` auf `350` erhoeht. Dadurch durchsucht der Lauf deutlich mehr Gewichtungs- und `H2H_K`-Kandidaten pro Start, was die Chancen auf bessere Referenz- oder Future-Ergebnisse steigert, aber Laufzeit und Artefaktmenge spuerbar erhoeht.
+Im aktuellen Commit wurde die Backfill-Logik fuer `reference` erweitert: sobald gespeicherte Future-Runs gegen echte Referenzwerte bewertet werden koennen, schreibt `append_future_vs_reference_metrics(...)` jetzt zusaetzlich eine eigene Evaluationshistorie nach `future_vs_reference_metrics.csv`. Dazu kamen der Import von `datetime`, neue Delta-Spalten gegen prognostizierte Kennzahlen und ein kleines Reporting der besten evaluierten Laeufe.
