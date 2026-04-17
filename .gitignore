@@ -12,3 +12,8 @@ C:\AI Projekt\KI-Projekt\.venv\Lib\site-packages\APScheduler-3.11.0.dist-info/
 .venv/
 .venv_broken_*/
 
+
+Sports Api Data/Testruns/BWIN Odds/Datacollection/*.csv
+__pycache__/
+*.pyc
+
