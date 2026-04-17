@@ -1,0 +1,14 @@
+git 
+.venv/
+.venv_broken_*/
+.vscode/
+__pycache__/
+.python311-embed/
+.claude/
+C:\AI Projekt\KI-Projekt\.venv\Lib\site-packages\APScheduler-3.11.0.dist-info/
+
+
+
+.venv/
+.venv_broken_*/
+
