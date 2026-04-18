@@ -1,4 +1,4 @@
-import http.client
+﻿import http.client
 import json
 import os
 import time
@@ -7,7 +7,7 @@ from datetime import datetime
 
 def remove_keys(obj, keys_to_remove):
     """
-    Entfernt rekursiv alle Schlüssel, die in keys_to_remove enthalten sind,
+    Entfernt rekursiv alle SchlÃ¼ssel, die in keys_to_remove enthalten sind,
     aus Dictionaries und Listen.
     """
     if isinstance(obj, dict):
@@ -59,11 +59,25 @@ def collect_player_stats():
     except FileNotFoundError:
         existing_stats = []
         print(f"[{datetime.now()}] Keine bestehende Spielerstatistik-Datei gefunden. Es wird eine neue Liste erstellt.")
+    except json.JSONDecodeError as exc:
+        existing_stats = []
+        backup_path = f"{output_file_path}.corrupt_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            os.replace(output_file_path, backup_path)
+            print(
+                f"[{datetime.now()}] WARNUNG: Defekte JSON-Datei erkannt ({exc}). "
+                f"Backup erstellt: '{backup_path}'. Es wird mit leerer Liste fortgesetzt."
+            )
+        except OSError:
+            print(
+                f"[{datetime.now()}] WARNUNG: Defekte JSON-Datei erkannt ({exc}). "
+                f"Backup konnte nicht erstellt werden, es wird mit leerer Liste fortgesetzt."
+            )
     
     existing_fixture_ids = {stats.get("fixture_id") for stats in existing_stats if stats.get("fixture_id") is not None}
 
     # ---------------------------
-    # 3) Für jede Fixture-ID individuelle Spielerstatistiken abrufen
+    # 3) FÃ¼r jede Fixture-ID individuelle Spielerstatistiken abrufen
     # ---------------------------
     conn = http.client.HTTPSConnection("v3.football.api-sports.io")
     headers = {
@@ -75,7 +89,7 @@ def collect_player_stats():
     total_ids = len(fixture_ids)
     for idx, fid in enumerate(fixture_ids, start=1):
         if fid in existing_fixture_ids:
-            print(f"[{idx}/{total_ids}] Fixture-ID {fid} bereits erfasst, überspringe.")
+            print(f"[{idx}/{total_ids}] Fixture-ID {fid} bereits erfasst, Ã¼berspringe.")
             continue
 
         endpoint = f"/fixtures/players?fixture={fid}"
@@ -85,20 +99,20 @@ def collect_player_stats():
         try:
             stats_json = json.loads(data.decode("utf-8"))
         except json.JSONDecodeError:
-            print(f"[{idx}/{total_ids}] Fehler beim Dekodieren für Fixture-ID {fid}.")
+            print(f"[{idx}/{total_ids}] Fehler beim Dekodieren fÃ¼r Fixture-ID {fid}.")
             continue
 
         remove_keys(stats_json, {"logo", "photo"})
         stats_json["fixture_id"] = fid
         new_stats.append(stats_json)
-        print(f"[{idx}/{total_ids}] Daten für Fixture-ID {fid} abgerufen.")
+        print(f"[{idx}/{total_ids}] Daten fÃ¼r Fixture-ID {fid} abgerufen.")
         time.sleep(0.15)
 
     conn.close()
 
     if new_stats:
         existing_stats.extend(new_stats)
-        print(f"[{datetime.now()}] {len(new_stats)} neue Einträge hinzugefügt.")
+        print(f"[{datetime.now()}] {len(new_stats)} neue EintrÃ¤ge hinzugefÃ¼gt.")
     else:
         print(f"[{datetime.now()}] Keine neuen Daten gefunden.")
 
@@ -111,17 +125,19 @@ def collect_player_stats():
     print(f"[{datetime.now()}] Fertig. Datei gespeichert: '{output_file_path}'")
 
 # ---------------------------
-# Planung: Automatische Ausführung
+# Planung: Automatische AusfÃ¼hrung
 # ---------------------------
-schedule.every().saturday.at("01:00").do(collect_player_stats)
-schedule.every().sunday.at("01:00").do(collect_player_stats)
-schedule.every().monday.at("01:00").do(collect_player_stats)
+if __name__ == "__main__":
+    # 1) Direkt beim Start einmal ausfuehren
+    collect_player_stats()
 
-# 1) Direkt beim Start einmal ausführen
-collect_player_stats()
+    schedule.every().saturday.at("01:00").do(collect_player_stats)
+    schedule.every().sunday.at("01:00").do(collect_player_stats)
+    schedule.every().monday.at("01:00").do(collect_player_stats)
 
-print("Scheduler gestartet. Warte auf die nächsten Ausführungen ...")
-# 2) Scheduler-Schleife
-while True:
-    schedule.run_pending()
-    time.sleep(3600)
+    print("Scheduler gestartet. Warte auf die naechsten Ausfuehrungen ...")
+    # 2) Scheduler-Schleife
+    while True:
+        schedule.run_pending()
+        time.sleep(3600)
+

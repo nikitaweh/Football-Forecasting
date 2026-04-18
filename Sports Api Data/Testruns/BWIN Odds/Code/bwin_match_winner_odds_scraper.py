@@ -34,6 +34,11 @@ WAIT_TIMEOUT_SECONDS = 35
 # 2) Wenn leer, nutzt Selenium den Standard-Mechanismus
 WEBDRIVER_PATH = os.getenv("BWIN_WEBDRIVER_PATH", "").strip()
 PREFERRED_BROWSER = os.getenv("BWIN_BROWSER", "chrome").strip().lower()
+SELENIUM_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".selenium_cache")
+
+# Keep Selenium Manager cache inside the project to avoid permission issues on locked profiles.
+os.makedirs(SELENIUM_CACHE_DIR, exist_ok=True)
+os.environ.setdefault("SE_CACHE_PATH", SELENIUM_CACHE_DIR)
 
 
 ODD_PATTERN = re.compile(r"^\d+[.,]\d{2}$")

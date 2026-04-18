@@ -896,7 +896,8 @@ else:
         X_pred_imp = imputer.transform(X_pred_scaled)
 
         X_train_w = X_train_imp * weight_vec
-        model = SklearnModel(n_trees=50)
+        # Use a single worker to avoid multiprocessing pipe permission issues on restricted hosts.
+        model = SklearnModel(n_trees=50, n_jobs=1)
         model.fit(X_train_w, y_train.values)
 
         train_preds = model.predict(X_train_w)
