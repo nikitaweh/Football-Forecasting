@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import pandas as pd
 from datetime import datetime
@@ -33,6 +34,10 @@ OUTPUT_COLUMNS = [
 # ---------------------------
 API_KEY = "abcc68d734dd721e64e567bb8c6c4bb8"
 HOURLY_FORECAST_URL = "https://pro.openweathermap.org/data/2.5/forecast/hourly"
+REQUEST_CONNECT_TIMEOUT = 4
+REQUEST_READ_TIMEOUT = 8
+REQUEST_RETRIES = 1
+REQUEST_BACKOFF_SECONDS = 1.0
 
 # ---------------------------
 # Hilfsfunktion: Wetter-Offsets je nach Anstosszeit
@@ -125,6 +130,37 @@ def _build_forecast_index(entries):
 def _empty_forecast():
     return {"by_time": {}, "times": [], "min_time": None, "max_time": None, "source": "forecast"}
 
+def _request_forecast_with_retries(params):
+    last_error = None
+    total_attempts = REQUEST_RETRIES + 1
+
+    for attempt in range(1, total_attempts + 1):
+        try:
+            resp = requests.get(
+                HOURLY_FORECAST_URL,
+                params=params,
+                timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT)
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.Timeout as e:
+            last_error = e
+            print(f"Forecast Timeout (Versuch {attempt}/{total_attempts}).")
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            status_code = getattr(e.response, "status_code", None)
+            print(f"Forecast HTTP/Netzwerkfehler (Versuch {attempt}/{total_attempts}): {e}")
+            # 4xx (ausser 429) sind meist nicht transient und werden nicht erneut versucht.
+            if status_code and 400 <= status_code < 500 and status_code != 429:
+                break
+
+        if attempt < total_attempts:
+            time.sleep(REQUEST_BACKOFF_SECONDS * attempt)
+
+    if last_error:
+        raise last_error
+    raise RuntimeError("Forecast-Request fehlgeschlagen ohne konkrete Exception.")
+
 def _fetch_forecast(lat, lon):
     try:
         params = {
@@ -133,9 +169,7 @@ def _fetch_forecast(lat, lon):
             "appid": API_KEY,
             "units": "metric"
         }
-        resp = requests.get(HOURLY_FORECAST_URL, params=params, timeout=20)
-        resp.raise_for_status()
-        data = resp.json()
+        data = _request_forecast_with_retries(params)
         hourly = data.get("list") or data.get("hourly", [])
         if hourly:
             forecast = _build_forecast_index(hourly)
