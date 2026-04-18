@@ -1,7 +1,8 @@
+﻿import csv
 import json
-import csv
 import os
 from datetime import datetime
+
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -16,14 +17,14 @@ OUTPUT_CSV = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Data
 # Teamnamen-Overrides
 # ---------------------------
 team_name_overrides = {
-    "Bayern Munich": "Bayern MÃ¼nchen",
+    "Bayern Munich": "Bayern M\u00fcnchen",
     "Hertha Berlin": "Hertha BSC",
-    "Borussia Monchengladbach": "Borussia MÃ¶nchengladbach",
-    "FC Nurnberg": "1. FC NÃ¼rnberg",
-    "Fortuna Dusseldorf": "Fortuna DÃ¼sseldorf",
+    "Borussia Monchengladbach": "Borussia M\u00f6nchengladbach",
+    "FC Nurnberg": "1. FC N\u00fcrnberg",
+    "Fortuna Dusseldorf": "Fortuna D\u00fcsseldorf",
     "FC Heidenheim": "1. FC Heidenheim",
     "Vfl Bochum": "VfL Bochum",
-    "SpVgg Greuther Furth": "SpVgg Greuther FÃ¼rth",
+    "SpVgg Greuther Furth": "SpVgg Greuther F\u00fcrth",
 }
 
 
@@ -31,9 +32,9 @@ def load_fixture_team_map():
     try:
         with open(FIXTURES_JSON, "r", encoding="utf-8") as f:
             fixtures = json.load(f).get("response", [])
-    except Exception as e:
+    except Exception as exc:
         print(
-            f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Hinweis: Fixtures konnten nicht geladen werden ({e}). "
+            f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Hinweis: Fixtures konnten nicht geladen werden ({exc}). "
             "Home/Away wird per Index zugewiesen."
         )
         return {}
@@ -60,12 +61,11 @@ def load_fixture_team_map():
 # Funktion: JSON zu CSV konvertieren
 # ---------------------------
 def convert_lineups_to_csv():
-    # JSON laden
     try:
         with open(INPUT_JSON, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as e:
-        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Fehler beim Laden der JSON: {e}")
+    except Exception as exc:
+        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Fehler beim Laden der JSON: {exc}")
         return
 
     rows = []
@@ -111,7 +111,6 @@ def convert_lineups_to_csv():
         home_id_expected = expected.get("home")
         away_id_expected = expected.get("away")
 
-        # Home/Away bevorzugt ueber Fixtures-Mapping, sonst Fallback auf Index.
         home_entry = next(
             (
                 e
@@ -133,7 +132,6 @@ def convert_lineups_to_csv():
             home_entry = lineups[0]
             away_entry = lineups[1]
 
-        # Hilfsfunktion, um die Zeilen zu bauen
         def add_player_rows(entry, is_start, side):
             if not isinstance(entry, dict):
                 return []
@@ -191,7 +189,6 @@ def convert_lineups_to_csv():
         rows += add_player_rows(home_entry, False, "home")
         rows += add_player_rows(away_entry, False, "away")
 
-    # CSV schreiben
     if rows:
         os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
         with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as csvfile:
@@ -218,7 +215,6 @@ def convert_lineups_to_csv():
 
 
 if __name__ == "__main__":
-    # 1) Job direkt beim Start ausfuehren
     convert_lineups_to_csv()
 
     sched = BlockingScheduler(timezone="Europe/Berlin")

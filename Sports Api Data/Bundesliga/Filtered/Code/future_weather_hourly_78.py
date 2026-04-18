@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import requests
 import pandas as pd
@@ -273,16 +273,46 @@ def main():
     out = pd.DataFrame(rows)
     out = out.drop_duplicates(subset=["MatchID", "Home Team ID", "Home Team", "City", "DateTime"])
     out["DateTime"] = out["DateTime"].dt.strftime("%A %d %B,%Y,%H:%M")
-
     if os.path.exists(output_csv_file):
         existing_df = pd.read_csv(output_csv_file, dtype={"MatchID": int})
     else:
         existing_df = pd.DataFrame(columns=OUTPUT_COLUMNS)
-    key_cols = ["MatchID", "Home Team ID", "Home Team", "City", "DateTime"]
-    merged = out.merge(existing_df[key_cols], on=key_cols, how="left", indicator=True)
-    new_out = merged[merged["_merge"] == "left_only"][out.columns]
 
-    _write_output_csv(new_out)
+    key_cols = ["MatchID", "Home Team ID", "Home Team", "City", "DateTime"]
+    for col in OUTPUT_COLUMNS:
+        if col not in existing_df.columns:
+            existing_df[col] = None
+
+    # Vergangene Forecast-Slots aus der Datei entfernen.
+    dropped_past = 0
+    if not existing_df.empty:
+        parsed_dt = pd.to_datetime(existing_df["DateTime"], format="%A %d %B,%Y,%H:%M", errors="coerce")
+        fallback_mask = parsed_dt.isna()
+        if fallback_mask.any():
+            parsed_dt.loc[fallback_mask] = pd.to_datetime(existing_df.loc[fallback_mask, "DateTime"], errors="coerce")
+
+        now_naive = now_local.replace(tzinfo=None)
+        future_mask = parsed_dt > now_naive
+        dropped_past = int((~future_mask).sum())
+        existing_df = existing_df.loc[future_mask].copy()
+
+    out_keys = set(out[key_cols].itertuples(index=False, name=None))
+    existing_keys = set(existing_df[key_cols].drop_duplicates().itertuples(index=False, name=None)) if not existing_df.empty else set()
+
+    inserted = len(out_keys - existing_keys)
+    replaced = len(out_keys & existing_keys)
+
+    keep_mask = ~existing_df[key_cols].apply(tuple, axis=1).isin(out_keys) if not existing_df.empty else pd.Series(dtype=bool)
+    keep_df = existing_df.loc[keep_mask] if not existing_df.empty else existing_df
+
+    combined_df = pd.concat([keep_df, out], ignore_index=True)
+    combined_df = combined_df.drop_duplicates(subset=key_cols, keep="last")
+    combined_df = combined_df[OUTPUT_COLUMNS]
+    combined_df.to_csv(output_csv_file, index=False)
+
+    print(
+        f"Forecast upsert abgeschlossen: {inserted} neu, {replaced} aktualisiert, {dropped_past} vergangene Slots entfernt -> {output_csv_file}"
+    )
 
 # ---------------------------
 # Scheduler helper: Run only on full hours that match current games
@@ -319,3 +349,7 @@ if __name__ == "__main__":
         )
         print("Scheduler gestartet - prueft jede volle Stunde (Europe/Berlin)")
         sched.start()
+
+
+
+
