@@ -1,255 +1,213 @@
-# `AI_match_stats_prediction.py`
+﻿# `AI_match_stats_prediction.py`
 
 Source: `Sports Api Data/Testruns/Code/AI_match_stats_prediction.py`
 
-## Überblick
+## Ueberblick
 
-Dieses Modul ist die umfangreichste Vorhersage-Pipeline im Testruns-Bereich. Es kombiniert historische Match-Statistiken, Team-Staerken, Formkurven, Head-to-Head-Merkmale, Wetterdaten und optional prognostizierte Match-Stats, um fuer Bundesliga-Spiele Ergebniswahrscheinlichkeiten und plausible Scorelines zu erzeugen.
+Dieses Skript ist eine End-to-End-Pipeline fuer Bundesliga-Match-Vorhersagen.
+Es erzeugt pro Match Wahrscheinlichkeiten fuer `H`/`D`/`A` und eine plausible Scoreline.
 
-Der Ablauf ist bewusst in zwei Ebenen getrennt: zuerst werden Pre-Match-Features gebaut, danach wird entweder mit echten Match-Statistiken, mit vorab prognostizierten Match-Statistiken oder ganz ohne Match-Stats ein Outcome-Modell trainiert. Fuer jede Kandidaten-Konfiguration werden Feature-Gewichte, ein H2H-Zuverlaessigkeitsparameter und Bewertungsmetriken protokolliert. Neu hinzugekommen ist ein eigener Persistenzpfad fuer den Vergleich bereits gespeicherter Future-Runs gegen spaeter bekannte Reference-Ergebnisse.
+Wichtig: Das Outcome-Modell sagt nicht direkt Klassen voraus, sondern `GoalDiff = HomeGoals - AwayGoals`.
+Aus dem vorhergesagten `GoalDiff` werden anschliessend Klassenwahrscheinlichkeiten abgeleitet.
 
-## Zweck / Responsibilities
+Seit `FEATURE_SCHEMA_VERSION = 'bases_v2_hybrid'` ist die Outcome-Feature-Architektur so umgebaut, dass nicht mehr
+ein flacher Feature-Vektor gewichtet wird, sondern 3 Basissignale (General/H2H/Player) plus Wetter als Kontext:
 
-- Laedt und vereinheitlicht mehrere CSV-Quellen aus dem Filtered-Datacollection-Ordner.
-- Baut historische Team- und Gegner-Merkmale fuer Heim- und Auswaertsteams.
-- Ergaenzt Wetterdaten aus historischen und zukuenftigen Quellen.
-- Unterstuetzt zwei Zielmodi:
-  - `reference` fuer Debugging und Bewertung gegen bekannte Ergebnisse.
-  - `future` fuer echte Vorhersagen kommender Spiele.
-- Unterstuetzt drei Match-Stats-Modi:
-  - `actual` nutzt vorhandene aktuelle Match-Statistiken.
-  - `predicted` schaetzt Match-Statistiken aus Pre-Match-Features.
-  - `off` entfernt Match-Statistiken komplett aus dem Outcome-Modell.
-- Trainiert pro Kandidatenlauf ein BART-Regressionsmodell auf `GoalDiff`.
-- Leitet aus dem vorhergesagten GoalDiff Wahrscheinlichkeiten fuer `H`, `D` und `A` ab.
-- Schaetzt ein plausibles Endergebnis ueber offensive und defensive Team-Baselines.
-- Speichert Run-Historie, Pareto-Entscheidungssets, Kandidaten-Rankings und Ergebnisdateien.
-- Haengt Future-vs-Reference-Evaluations-Snapshots an eine eigene CSV-Historie an.
+- `General_BaseSignal`: (Home - Away) aus Match-Stats-Subgruppen (inkl. xG), mit festen Subgruppen-Gewichten.
+- `H2H_BaseSignal`: gewichtetes Signal aus H2H-Features (diese sind bereits relativ).
+- `Player_BaseSignal`: aktuell Platzhalter (0.0), als Anschlussstelle fuer die Player-Pipeline.
+- Wetter bleibt als Kontext (`Weather_*`) und wird direkt als gewichtete Input-Spalte in die Design-Matrix genommen.
 
-## Pipeline In Kurzform
+## Ziele / Responsibilities
 
-1. Stammdaten, Match-Statistiken und Teamdaten laden.
-2. Spalten aus verschiedenen CSV-Layouts auf gemeinsame Namen bringen.
-3. Team- und Wetterdaten in ein gemeinsames Match-DataFrame mergen.
-4. Historische H2H-Features und letzte-5-Spiele-Formmerkmale berechnen.
-5. Trainings- und Zielmenge je nach `PREDICTION_MODE` bilden.
-6. Optional Match-Statistiken per Regressionsmodellen vorhersagen.
-7. Fuer jeden Kandidatenlauf Feature-Gewichte und `H2H_K` sampeln.
-8. H2H-Signale mit `alpha = MatchCount / (MatchCount + k)` abschwaechen.
-9. Features imputieren, gewichten und BART auf `GoalDiff` trainieren.
-10. `GoalDiff` in Ergebniswahrscheinlichkeiten und Scorelines umrechnen.
-11. Laeufe gegen Referenzen bewerten oder fuer Future-Laeufe nach Confidence ranken.
+- Laedt und normalisiert Stammdaten, Match-Stats, Teamdaten und Wetterdaten.
+- Baut Teamstaerke- und Form-Features (Baseline + Rolling L5) sowie H2H-Features (inkl. MatchCount).
+- Unterstuetzt `PREDICTION_MODE`:
+  - `reference`: bewertet Runs gegen Referenz-Ergebnisse.
+  - `future`: erstellt Vorhersagen fuer kommende (ungespielte) Spiele.
+- Unterstuetzt `MATCH_STATS_MODE`:
+  - `actual`: nutzt vorhandene Match-Stats aus den Daten.
+  - `predicted`: sagt Match-Stats aus Pre-Match-Features voraus (GBR pro Zielspalte).
+  - `off`: entfernt Match-Stats aus dem Outcome-Signal (General-Signal wird 0; H2H/Wetter bleiben aktiv).
+- Trainiert pro Kandidatenlauf ein BART-Regressionsmodell (bartpy) auf `GoalDiff`.
+- Wandelt `GoalDiff` via Normalapproximation (Residual-Sigma) in `WinProb/DrawProb/LoseProb` um.
+- Speichert Ergebnisse, Run-Summaries, Run-Historie und Entscheidungstabellen (Pareto/Ranking).
+- Fuehrt eine Schema-Versionierung fuer Run-Historien ein, um alte und neue Gewichtsschemata sauber zu trennen.
 
-## Wichtige Datenquellen
+## Datenquellen (Inputs)
 
-- `match_statistics_filtered_78.csv`: Match-spezifische Spielstatistiken.
-- `Stammdaten_78.csv`: Basisinformationen pro Match, darunter Teams, Datum und `Played`.
-- `Teams_78.csv`: Team-Metadaten wie IDs, Name und Stadionparameter.
-- `historical_weather_data_78.csv`: historische Wettermerkmale pro Match.
-- `weather_data.csv`: zusaetzliche Wetterdaten im jeweiligen Output-Ordner.
-- `match_results_references.csv`: Referenzziele fuer Evaluation im Reference-Modus.
-- `surrogate_run_history.csv`: Historie frueherer Laeufe fuer das Surrogate-Ranking.
-- `future_vs_reference_metrics.csv`: spaetere Bewertung gespeicherter Future-Runs gegen echte Reference-Ergebnisse.
+Primaer (aus `DATA_PATH`):
 
-## Wichtige Konstanten / Konfiguration
+- `match_statistics_filtered_78.csv`: Match-Statistiken (inkl. xG-Spalten).
+- `Stammdaten_78.csv`: Match-Grunddaten (MatchID, Teams, Datum, Played).
+- `Teams_78.csv`: Team-Metadaten.
+- `historical_weather_data_78.csv`: historische Wetterdaten pro Match.
+- optional im Output-Ordner: `weather_data.csv` (zusaetzliches Wetter, wird mit historischen Daten zusammengefuehrt).
 
-- `DATA_PATH`: Basispfad fuer gefilterte Bundesliga-Daten.
-- `TESTRUNS_PATH`: Basispfad fuer Referenz- und Future-Ausgaben.
-- `FUTURE_OUTPUT_PATH`: Ausgabeordner fuer Vorhersagen kommender Spiele.
-- `REFERENCE_OUTPUT_PATH`: Ausgabeordner fuer Referenzbewertungen.
-- `WEATHER_HIST_PATH`: historische Wetterdatei.
-- `MAX_RUNS = 350`: maximale Kandidatenlaeufe pro Skriptstart.
-- `RANDOM_STATE = 42`: Seed fuer Reproduzierbarkeit.
-- `PREDICTION_MODE = 'reference'`: aktueller Modus im Stand `HEAD`.
-- `MATCH_STATS_MODE = 'predicted' if PREDICTION_MODE == 'future' else 'actual'`: Standardlogik fuer Match-Stats.
-- `MATCH_STATS_MODEL = 'gbr'`: Modell fuer Match-Stats-Schaetzung.
-- `MATCH_STATS_CV_SPLITS = 5`: Cross-Validation-Splits fuer Out-of-Fold-Prognosen.
-- `MATCH_STATS_MIN_ROWS = 25`: Mindestmenge fuer modellierte Match-Stats.
-- `SURROGATE_MODEL = 'gbr'`: Modell fuer die spaetere Kandidatenbewertung.
-- `SURROGATE_MIN_HISTORY = 100`: Mindesthistorie, bevor das Surrogate-Modell verwendet wird.
-- `SURROGATE_CANDIDATES = 300`: Anzahl erzeugter Kandidaten fuer die Vorauswahl.
-- `SURROGATE_RANDOM_FRACTION = 0.2`: Anteil explorativer Kandidaten.
-- `PARETO_TARGET_SIZE = 20`: Zielgroesse fuer Entscheidungstabellen.
-- `H2H_K_RANGE = (1, 10)`: Suchraum fuer die H2H-Abschwaechung.
-- `H2H_K_DEFAULT = 2`: Fallback fuer fehlende historische Werte.
-- `FUTURE_VS_REFERENCE_METRICS_PATH`: Evaluationshistorie fuer nachtraeglich gescorte Future-Runs.
+Referenz-/Historieninputs (aus Output-Ordnern):
 
-## Feature-Gruppen
+- `match_results_references.csv`: Referenz-Targets im `reference`-Modus.
+- `surrogate_run_history.csv`: Historie frueherer Runs (Surrogate-Auswahl im `future`-Modus oder als Ranking-Basis).
+- `prediction_weight_runs.csv` + `prediction_weight_run_summary.csv`: gespeicherte Future-Runs fuer spaeteres Backfill-Scoring.
 
-### Outcome-Pre-Match-Features
+## Outputs (Artefakte)
 
-- Team-Baselines: `Home_BaseAvgGoalsFor`, `Away_BaseAvgPoints` usw.
-- Formmerkmale der letzten 5 Spiele fuer Tore, Gegentore und Punkte.
-- Kombinierte H2H-Metriken ueber alle Begegnungen.
-- Venue-spezifische H2H-Metriken fuer Heim/Auswaerts-Kontext.
-- Wettermerkmale wie Temperatur, Druck, Luftfeuchtigkeit und Niederschlag.
+- `prediction_weight_runs.csv`: Pro Match und Run: Wahrscheinlichkeiten, PredictedGoalDiff, Scoreline, Gewichte, Basissignale.
+- `prediction_weight_run_summary.csv`: Pro Run: AvgNLL, Accuracy, H2H_K, Confidence-Metriken, Gewichte.
+- `surrogate_run_history.csv`: Append-only Historie fuer Surrogate (mit Dedupe).
+- `predicted_match_stats.csv`: Export prognostizierter Match-Stats (nur bei `MATCH_STATS_MODE='predicted'`).
+- `pareto_front.csv`: Pareto-/Decision-Set im `reference`-Modus.
+- `future_candidate_ranking.csv`: Kandidatenranking und Empfehlungen im `future`-Modus.
+- `future_outcome_table.csv`: komprimierte Empfehlung fuer die ausgewaehlte Run-Konfiguration (nur `future`).
+- `future_vs_reference_metrics.csv`: Backfill-Auswertungen, wenn gespeicherte Future-Runs spaeter gegen Referenzen gescored werden.
 
-### Match-Stats-Features
+## Konfiguration (Wichtigste Konstanten)
 
-- Ballbesitz, Schuesse, Schuesse aufs Tor.
-- Paesse und Passgenauigkeit.
-- Fouls, Gelbe und Rote Karten.
-- Abseits und Ecken.
+- Pfade: `DATA_PATH`, `TESTRUNS_PATH`, `FUTURE_OUTPUT_PATH`, `REFERENCE_OUTPUT_PATH`.
+- Modi: `PREDICTION_MODE` und `MATCH_STATS_MODE`.
+- Match-Stats-Prediction: `MATCH_STATS_MODEL`, `MATCH_STATS_CV_SPLITS`, `MATCH_STATS_MIN_ROWS`.
+- Sampling: `MAX_RUNS`, `RANDOM_STATE`.
+- Surrogate: `SURROGATE_MODEL`, `SURROGATE_MIN_HISTORY`, `SURROGATE_CANDIDATES`, `SURROGATE_RANDOM_FRACTION`.
+- H2H: `H2H_K_RANGE`, `H2H_K_DEFAULT`.
+- Schema: `FEATURE_SCHEMA_VERSION` (wird in Outputs und Run-Historie geschrieben und gefiltert).
 
-### Team-Kontext-Features
+## Pipeline Schritt fuer Schritt
 
-- `HomeTeamID`
-- `AwayTeamID`
+### 1) Laden, Umbenennen, Mergen
 
-## Zentrale Funktionen
+1. CSVs werden geladen.
+2. Spalten werden auf ein gemeinsames Schema umbenannt.
+3. Der Merge startet absichtlich bei `Stammdaten_78.csv`, damit auch ungespielte Matches erhalten bleiben.
+4. Wetter wird aus historisch + optional zukuenftig zusammengefuehrt und per `MatchID` gemerged.
 
-### Datenvorbereitung
+Wichtige Details:
 
-- `load_weather(path)`: liest Wetter-CSV, normalisiert Spaltennamen und erzwingt numerische Wetterspalten.
-- `coerce_numeric_columns(df_src, columns)`: konvertiert definierte Feature-Spalten robust nach numerisch.
-- `add_team_asof_features(df_src, team_id_col, prefix)`: fuegt pro Team die letzte bekannte L5-Form per `merge_asof` an.
+- xG wird explizit auf `HomeXG` / `AwayXG` umbenannt. Fehlende Werte bleiben `NaN` und werden spaeter per Median-Imputation behandelt.
+- `df['MatchDate']` wird zu `datetime` konvertiert, da viele Features (H2H, Rolling L5) zeitbasiert sind.
 
-### Head-to-Head-Logik
+### 2) Pre-Match Features (Teamstaerke, Form, H2H)
 
-- `summarize_h2h(subset)`: erzeugt Mittelwerte und Match-Anzahl fuer direkte Duelle.
-- `add_h2h_features(df_src)`: baut pro Match kombinierte und venue-spezifische H2H-Features.
-- `apply_h2h_scaling(feature_df, k)`: schwacht H2H-Merkmale nach Verlaesslichkeit ab.
+Team-Features:
 
-### Referenz- und Historienlogik
+- Baseline-Staerke pro Team: Mittelwerte ueber alle historischen Spiele.
+- Rolling-Form: L5-Mittelwerte mit `shift(1)` fuer Leakage-Sicherheit.
 
-- `load_reference_results(primary_path, fallback_path=None)`: laedt Referenzziele aus mehreren moeglichen Pfaden.
-- `read_optional_csv(path)`: toleranter CSV-Leser fuer optionale Artefakte.
-- `prepare_run_summary(summary_df)`: bereitet Laufmetriken fuer Sortierung und Persistenz auf.
-- `append_to_run_history(history_path, summary_df)`: haengt neue Ergebnisse an die Run-Historie an und dedupliziert.
-- `append_future_vs_reference_metrics(metrics_path, summary_df)`: schreibt Backfill-Evaluationen mit Delta- und Ranking-Spalten in eine separate Future-Historie.
-- `try_backfill_reference_from_future(ref_results)`: nutzt bereits gespeicherte Future-Runs, um Referenzfaelle nachtraeglich zu scoren.
+H2H-Features:
 
-### Prediction- und Modelllogik
+- Kombiniert und Venue-basiert (Home vs. Away), jeweils mit `MatchCount`.
+- `apply_h2h_scaling` skaliert H2H-Werte im Outcome-Training mit `alpha = MatchCount / (MatchCount + k)`.
 
-- `build_prediction_frame(df_src, ref_results, mode, future_limit=9, reference_limit=None)`: waehlt die Zielmenge fuer Reference- oder Future-Laeufe.
-- `make_match_stats_regressor()`: erstellt derzeit einen `GradientBoostingRegressor`.
-- `fit_match_stats_estimator(x_train, y_train)`: imputiert Eingaben und trainiert das Match-Stats-Modell.
-- `postprocess_match_stats(pred_df)`: begrenzt Prozentwerte auf 0 bis 100 und rundet Count-Features sinnvoll.
-- `build_match_stats_predictions(train_df, predict_df, feature_cols, target_cols)`: erzeugt Out-of-Fold- und Inferenz-Prognosen fuer jede Match-Stats-Zielspalte.
-- `apply_match_stats_mode(train_df, predict_df, raw_predict_df)`: integriert je nach Modus echte, prognostizierte oder keine Match-Stats.
-- `mean_available(values, default_value=1.25)`: bildet robuste Mittelwerte ueber optionale Signale.
-- `estimate_scoreline(match_row, predicted_goal_diff, predicted_result)`: baut aus GoalDiff und Team-Baselines ein plausibles Ergebnis.
+### 3) Split in Train vs. Predict
 
-### Auswahl und Ranking
+- Train: `Played == True`.
+- Predict: je nach Modus:
+  - `reference`: MatchIDs aus `match_results_references.csv`.
+  - `future`: naechste ungespielte Matches nach Datum (Hard-Limit `future_limit=9` in `build_prediction_frame`).
 
-- `compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy')`: bestimmt nicht-dominierte Kandidaten.
-- `build_pareto_decision_set(df, target_size=PARETO_TARGET_SIZE)`: erweitert das strenge Pareto-Set zu einer arbeitsfaehigen Shortlist.
-- `rank_component(series, smaller_is_better=False)`: wandelt Metriken in relative Ranking-Komponenten um.
-- `build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE)`: erzeugt Empfehlungen fuer `Balanced`, `Conservative` und `Aggressive`.
-- `load_run_history(path, weight_cols, match_stats_mode)`: filtert historische Runs passend zum aktuellen Match-Stats-Modus.
-- `train_surrogate_model(history_df, feature_cols, target_col)`: trainiert die Meta-Bewertung ueber historische Resultate.
-- `generate_candidate_df(num, features, k_range)`: sampelt zufaellige Gewichtungs-Kandidaten.
-- `select_candidates_with_surrogate(candidates_df, pred_nll, pred_acc, max_runs, random_frac)`: mischt exploitative und explorative Kandidaten.
+### 4) Match-Stats-Modus anwenden (actual/predicted/off)
 
-## Inputs / Outputs / Side Effects
+Die Funktion `apply_match_stats_mode(...)` entscheidet, welche Input-Spalten fuer das Outcome-Signal zusaetzlich verfuegbar sind:
 
-### Inputs
+- `off`: keine Match-Stats; General-Signal wird spaeter 0.0.
+- `actual`: Match-Stats-Spalten kommen aus `df` (soweit vorhanden).
+- `predicted`: `build_match_stats_predictions(...)` sagt jede Match-Stats-Zielspalte via GBR voraus.
 
-- CSV-Dateien im `DATA_PATH`-Ordner.
-- Optionale Wetterdatei aus dem aktiven Output-Ordner.
-- Referenzdateien fuer Match-Ergebnisse.
-- Historische Ergebnisdateien frueherer Testruns.
+`build_match_stats_predictions(...)` Details:
 
-### Outputs
+- Pro Zielspalte wird nur dann ein Modell trainiert, wenn genug Beobachtungen und Varianz vorhanden sind.
+- Out-of-Fold (KFold) wird genutzt, um Leakage im Train-Set zu vermeiden.
+- Fallback fuer Rest/Edge-Cases ist der Median der beobachteten Zielwerte.
+- `postprocess_match_stats(...)` normalisiert Prozentwerte (0..100) und rundet Count-Features; xG wird nicht gerundet.
 
-- `prediction_weight_runs.csv`: Detailergebnisse je Match und Run.
-- `prediction_weight_run_summary.csv`: aggregierte Laufmetriken.
-- `surrogate_run_history.csv`: fortlaufende Modellhistorie.
-- `pareto_front.csv`: Entscheidungsmenge im Reference-Modus.
-- `future_candidate_ranking.csv`: Kandidatenranking im Future-Modus.
-- `future_outcome_table.csv`: komprimierte Empfehlung fuer kommende Spiele.
-- `predicted_match_stats.csv`: prognostizierte Match-Statistiken im `predicted`-Modus.
-- `future_vs_reference_metrics.csv`: Snapshot-Historie fuer spaetere Ist-vs-Prognose-Auswertungen gespeicherter Future-Runs.
+### 5) Outcome-Architektur: 3 Basen + Kontext
 
-### Side Effects
+Aus dem (imputierten) Input-DataFrame wird eine Design-Matrix gebaut:
 
-- Erstellt Zielordner automatisch via `os.makedirs`.
-- Schreibt mehrere CSV-Artefakte pro Lauf.
-- Nutzt Zufallsstichproben fuer Gewichtungen, aber mit festem Seed.
-- Gibt viele Debug- und Statusmeldungen auf `stdout` aus.
-- Beendet den Prozess frueh mit `SystemExit(0)`, wenn Reference-Backfill erfolgreich war.
+- `General_BaseSignal`
+- `H2H_BaseSignal`
+- `Player_BaseSignal` (aktuell 0.0)
+- plus Wetter-Kontextspalten `Weather_*`
 
-## Inputs Und Outputs Pro Funktionsgruppe
+Signaldefinition:
 
-### `load_weather(path)`
+- General-Signal: Home-minus-Away Differenzen pro Subgruppe, dann Blend:
+  - `GoalCreation` (xG, ShotsOnTarget, Shots)
+  - `GameControl` (Possession, Passes, PassAccuracy)
+  - `DisciplineSetPiece` (Fouls, Karten, Corners, Offsides; teils invertiert, weil mehr Fouls/Karten meist negativ sind)
+- H2H-Signal: gewichtete Kombination der vorhandenen relativen H2H-Features.
+- Wetter: bleibt absolut (keine Home/Away Differenz).
 
-- Input: Pfad zu Wetter-CSV.
-- Output: DataFrame mit `MatchID` plus normalisierten Wetterspalten.
-- Besonderheit: liefert leeres DataFrame bei fehlender oder leerer Datei.
+### 6) Gewichtsschema (Hybrid)
 
-### `build_match_stats_predictions(train_df, predict_df, feature_cols, target_cols)`
+Das Skript sampelt nicht mehr `Weight_<jede Feature-Spalte>`, sondern Gewichte fuer:
 
-- Input: Trainings- und Zielmenge plus Feature- und Zielspalten.
-- Output: prognostizierte Trainingswerte, Zielwerte und eine Summary-Tabelle.
-- Besonderheit: nutzt OOF-Splits nur, wenn genug Beobachtungen und Varianz vorliegen.
+1. Subgruppen-Features in `GENERAL_SIGNAL_GROUP_SPECS` (z.B. `General_GoalCreation_XG`).
+2. H2H-Features in `H2H_SIGNAL_SPECS` (z.B. `H2H_H2H_Combined_AvgGoalDiff`).
+3. Wetter-Kontext in `WEATHER_CONTEXT_SPECS` (z.B. `WeatherContext_Weather_Temperature_C`).
+4. Base-Multiplikatoren:
+   - `BaseMultiplier_General`
+   - `BaseMultiplier_H2H`
+   - `BaseMultiplier_Player`
 
-### `apply_match_stats_mode(train_df, predict_df, raw_predict_df)`
+Diese Parameterliste kommt aus `collect_weight_parameter_names(MATCH_STATS_MODE)`.
+Im `MATCH_STATS_MODE='off'` werden die General-Parameter nicht gesampelt/verwendet.
 
-- Input: vorbereitete Trainings- und Ziel-Frames.
-- Output: angereicherte Frames, aktive Featureliste, optionales Export-DataFrame und Summary.
-- Besonderheit: entscheidet die gesamte weitere Modellarchitektur.
+### 7) Training pro Run
 
-### `append_future_vs_reference_metrics(metrics_path, summary_df)`
+Pro Kandidatenlauf:
 
-- Input: Pfad zur Future-vs-Reference-Historie plus aggregierte Run-Summary eines Backfills.
-- Output: DataFrame der aktualisierten Evaluationshistorie mit Zeitstempel, Delta- und Ranking-Spalten.
-- Besonderheit: dedupliziert nach Evaluationszeitpunkt, Modus, Batch und Run und sortiert Bestkandidaten nach vorn.
+1. `k` wird gesampelt bzw. aus Kandidaten gesetzt.
+2. `apply_h2h_scaling` skaliert H2H-Inputs mit `k`.
+3. Median-Imputation auf alle Input-Spalten.
+4. `build_outcome_design_matrix(...)` baut die finalen Features (Basissignale + Wetter-Kontext) und wendet Gewichte an.
+5. BART-Regression auf `GoalDiff`.
+6. Residual-Sigma wird aus Train-Residuals geschaetzt.
+7. Vorhersage `mu` (GoalDiff) -> `WinProb/DrawProb/LoseProb` via Normalapproximation.
 
-### `estimate_scoreline(match_row, predicted_goal_diff, predicted_result)`
+### 8) Bewertung und Auswahl
 
-- Input: Match-Merkmale plus Ergebnis des GoalDiff-Modells.
-- Output: erwartete Heim- und Auswaertstore sowie gerundete Scoreline.
-- Besonderheit: korrigiert nachtraeglich, falls die gerundete Scoreline dem Klassenergebnis widerspricht.
+Reference-Modus:
 
-## Wichtige Validierungen Und Schutzmechanismen
+- `AvgNLL` und `Accuracy` werden gegen Referenz-Resultate berechnet.
+- Entscheidungstabelle ueber `build_pareto_decision_set(...)`.
 
-- Ungueltige `PREDICTION_MODE`-Werte loesen sofort `ValueError` aus.
-- `future` plus `MATCH_STATS_MODE='actual'` ist explizit verboten.
-- Fehlende Pflichtspalten nach dem Merge fuehren zu einem harten Fehler.
-- Leere Referenzdateien werden toleriert, aber begrenzen die Auswertung.
-- Leere Trainingsmengen nach Modusumschaltung loesen einen `ValueError` aus.
-- Prozentwerte werden nach Prognose auf einen gueltigen Bereich zurueckgesetzt.
-- Count-Features werden auf nichtnegative ganze Zahlen gekappt.
+Future-Modus:
 
-## Interne Abhaengigkeiten / Imports
+- Wenn genug Historie vorhanden ist: Surrogate-Modell schaetzt NLL/Accuracy fuer Kandidaten.
+- Sonst: Confidence-Fallback-Ranking ueber TopProb/Gap/Entropy.
+- `future_outcome_table.csv` wird fuer den ausgewaehlten Run erstellt.
 
-- `pandas`: DataFrame-Verarbeitung und CSV-I/O.
-- `math`: Normalverteilungsnahe CDF-Umrechnung und Logarithmen.
-- `os`: Pfadbau und Dateiexistenzpruefung.
-- `random`: Sampling fuer Feature-Gewichte und H2H-Kandidaten.
-- `datetime.datetime`: Zeitstempel fuer Future-vs-Reference-Evaluations-Snapshots.
-- `bartpy.sklearnmodel.SklearnModel`: Kernmodell fuer GoalDiff.
-- `sklearn.impute.SimpleImputer`: Median-Imputation.
-- `sklearn.model_selection.KFold`: OOF-Prognosen fuer Match-Stats.
-- `sklearn.model_selection.train_test_split`: Split fuer Outcome-Training.
-- `sklearn.ensemble.GradientBoostingRegressor`: Match-Stats- und Surrogate-Modell.
-- `sklearn.pipeline.make_pipeline`: Pipeline fuer den optionalen NN-Surrogate.
-- `sklearn.preprocessing.StandardScaler`: Skalierung fuer das NN-Surrogate.
-- `sklearn.neural_network.MLPRegressor`: alternativ vorgesehenes Surrogate-Modell.
+## Run-Historie und Schema-Versionierung
 
-## Beispiel
+Warum:
+
+- Das neue Weight-Schema ist nicht kompatibel zu aelteren `Weight_<Feature>`-Runs.
+
+Wie:
+
+- `FeatureSchemaVersion` wird in:
+  - `prediction_weight_runs.csv` (pro Match/Run),
+  - `prediction_weight_run_summary.csv` (pro Run),
+  - `surrogate_run_history.csv` (Historie)
+  geschrieben.
+- `load_run_history(...)` kann nach `FeatureSchemaVersion` filtern, und der Main-Loop uebergibt `FEATURE_SCHEMA_VERSION`.
+- `append_to_run_history(...)` dedupliziert u.a. auch nach `FeatureSchemaVersion`.
+
+## Troubleshooting / typische Stolperfallen
+
+- xG ist oft teilweise leer: das ist ok, solange Imputation aktiv ist.
+- `future` + `MATCH_STATS_MODE='actual'` ist nicht erlaubt (keine echten Match-Stats vor Anpfiff).
+- Wenn `match_results_references.csv` MatchIDs enthaelt, die nicht in `df` vorkommen: `build_prediction_frame` wirft einen Fehler.
+- `Player_BaseSignal` ist aktuell 0.0: das ist bewusst ein Platzhalter fuer die kommende Player-Pipeline.
+
+## Ausfuehren (Beispiel)
 
 ```bash
 python "Sports Api Data/Testruns/Code/AI_match_stats_prediction.py"
 ```
 
-Typischer Ablauf:
+Empfohlener Check nach einem Lauf:
 
-1. Modus ueber `PREDICTION_MODE` und `MATCH_STATS_MODE` festlegen.
-2. Skript starten.
-3. Danach die erzeugten CSV-Dateien im passenden Output-Ordner pruefen.
-4. Im Future-Modus zusaetzlich `future_candidate_ranking.csv` und `future_outcome_table.csv` auswerten.
-
-## Edge Cases / Notes
-
-- Wenn `match_results_references.csv` zwar existiert, aber MatchIDs nicht im Hauptdatensatz vorkommen, wird der Lauf abgebrochen.
-- Im `predicted`-Modus koennen einzelne Match-Stats-Ziele mangels Daten nur auf Median-Fallbacks basieren.
-- Das Skript nutzt viele `copy()`-Operationen; bei grossen Datenmengen ist der Speicherbedarf entsprechend hoch.
-- Die Future-Auswahl ist hart auf die naechsten 9 ungespielten Matches begrenzt.
-- Die Balance zwischen NLL und Accuracy wird ueber verschiedene Ranking-Strategien geloest, nicht ueber ein einzelnes Ziel.
-- `reference` kann vorhandene Future-Ergebnisse wiederverwenden, statt jedes Mal alle Modelle neu zu rechnen.
-- Wegen des Seedings sind Sampling-Ergebnisse reproduzierbar, aber nur solange sich Featureliste und Datenbasis nicht aendern.
-
-## Letzte beobachtete Aenderung
-
-Im aktuellen Commit wurde die Backfill-Logik fuer `reference` erweitert: sobald gespeicherte Future-Runs gegen echte Referenzwerte bewertet werden koennen, schreibt `append_future_vs_reference_metrics(...)` jetzt zusaetzlich eine eigene Evaluationshistorie nach `future_vs_reference_metrics.csv`. Dazu kamen der Import von `datetime`, neue Delta-Spalten gegen prognostizierte Kennzahlen und ein kleines Reporting der besten evaluierten Laeufe.
+1. `Sports Api Data/Testruns/Datacollection reference/prediction_weight_run_summary.csv` (Reference-Run-Metriken).
+2. `Sports Api Data/Testruns/Datacollection reference/pareto_front.csv` (Decision-Set).
+3. `Sports Api Data/Testruns/Datacollection reference/surrogate_run_history.csv` (Historie inkl. `FeatureSchemaVersion`).

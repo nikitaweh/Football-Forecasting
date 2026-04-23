@@ -1,39 +1,3 @@
-"""
-Model overview
-==============
-
-This script extends the original outcome model with a leakage-safe, two-stage
-pipeline for match statistics:
-
-1. Build pre-match features from historical team strength, rolling last-5 form,
-   head-to-head metrics, team context, and weather data.
-2. Depending on MATCH_STATS_MODE:
-   - "actual": use historical current-match stats directly
-   - "predicted": predict current-match stats from pre-match features only
-   - "off": remove current-match stats from the outcome model entirely
-3. In predicted mode, create out-of-fold stat predictions for the outcome
-   training rows and final stat predictions for the target prediction rows.
-4. Sample one weight per outcome feature plus one integer H2H reliability
-   parameter k.
-5. Scale H2H features with alpha = MatchCount / (MatchCount + k).
-6. Median-impute missing values and multiply each feature column by its sampled
-   weight.
-7. Train a BART model on historical GoalDiff = HomeGoals - AwayGoals.
-8. Convert the predicted goal difference mu into class probabilities using a
-   normal approximation with residual standard deviation sigma:
-      WinProb  = 1 - Phi((0.5 - mu) / sigma)
-      DrawProb = Phi((0.5 - mu) / sigma) - Phi((-0.5 - mu) / sigma)
-      LoseProb = Phi((-0.5 - mu) / sigma)
-9. Derive a plausible scoreline from the predicted goal difference plus team
-   scoring/conceding baselines.
-10. In reference mode, evaluate with AvgNLL and Accuracy.
-11. In future mode, rank candidate runs with surrogate-estimated metrics or,
-    if unavailable, with probability-confidence fallback metrics.
-
-Full documentation:
-Sports Api Data/Testruns/Code/AI_MATCH_STATS_PREDICTION_DOCUMENTATION.md
-"""
-
 import math
 import os
 import random
@@ -53,7 +17,7 @@ TESTRUNS_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns'
 FUTURE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection future')
 REFERENCE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection reference')
 WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
-MAX_RUNS = 350
+MAX_RUNS = 20
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
 
@@ -116,6 +80,13 @@ PARETO_TARGET_SIZE = 20
 # === H2H K SEARCH RANGE ===
 H2H_K_RANGE = (1, 10)
 H2H_K_DEFAULT = 2
+FEATURE_SCHEMA_VERSION = 'bases_v2_hybrid'
+
+GENERAL_SUBGROUP_BLEND = {
+    'GoalCreation': 0.55,
+    'GameControl': 0.30,
+    'DisciplineSetPiece': 0.15
+}
 
 # 1. Laden
 match_stats   = pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))
@@ -181,7 +152,8 @@ match_stats.rename(columns={
     'Home Yellow Card': 'HomeYellowCard', 'Away Yellow Card': 'AwayYellowCard',
     'Home Red Card': 'HomeRedCard', 'Away Red Card': 'AwayRedCard',
     'Home Offsides': 'HomeOffsides', 'Away Offsides': 'AwayOffsides',
-    'Home Corners': 'HomeCorners', 'Away Corners': 'AwayCorners'
+    'Home Corners': 'HomeCorners', 'Away Corners': 'AwayCorners',
+    'Expected Goals (xG) Home': 'HomeXG', 'Expected Goals (xG) Away': 'AwayXG'
 }, inplace=True)
 
 teams.rename(columns={
@@ -428,19 +400,20 @@ if False and PREDICTION_MODE == 'future' and not predict_df.empty:
 train_df['GoalDiff'] = train_df['HomeGoals'] - train_df['AwayGoals']
 train_df = train_df[train_df['GoalDiff'].notna()].copy()
 
-# 7. Features (Achtung: kommen aus match_stats und sind bei ungespielten oft NaN – XGBoost kann NaN handlen)
-outcome_prematch_features = [
+# 7. Features (Signal-Architektur: General + H2H + Player + Weather-Context)
+team_form_features = [
     'Home_BaseAvgGoalsFor', 'Home_BaseAvgGoalsAgainst', 'Home_BaseAvgPoints',
     'Away_BaseAvgGoalsFor', 'Away_BaseAvgGoalsAgainst', 'Away_BaseAvgPoints',
     'Home_AvgGoalsFor_L5', 'Home_AvgGoalsAgainst_L5', 'Home_AvgPoints_L5',
-    'Away_AvgGoalsFor_L5', 'Away_AvgGoalsAgainst_L5', 'Away_AvgPoints_L5',
-    'H2H_Combined_AvgGoalDiff', 'H2H_Combined_AvgGoalsFor', 'H2H_Combined_AvgGoalsAgainst',
-    'H2H_Combined_AvgPoints', 'H2H_Combined_WinRate', 'H2H_Combined_MatchCount',
-    'H2H_Venue_AvgGoalDiff', 'H2H_Venue_AvgGoalsFor', 'H2H_Venue_AvgGoalsAgainst',
-    'H2H_Venue_AvgPoints', 'H2H_Venue_WinRate', 'H2H_Venue_MatchCount'
+    'Away_AvgGoalsFor_L5', 'Away_AvgGoalsAgainst_L5', 'Away_AvgPoints_L5'
 ]
 
+h2h_base_features = H2H_COMBINED_FEATURES + H2H_VENUE_FEATURES
+h2h_count_features = ['H2H_Combined_MatchCount', 'H2H_Venue_MatchCount']
+outcome_prematch_features = team_form_features + h2h_base_features + h2h_count_features
+
 match_stats_features = [
+    'HomeXG', 'AwayXG',
     'HomePossession', 'AwayPossession',
     'HomeShots', 'AwayShots',
     'HomeShotsOnTarget', 'AwayShotsOnTarget',
@@ -467,9 +440,11 @@ team_context_features = [
     'AwayTeamID'
 ]
 
-match_stats_model_features = outcome_prematch_features + weather_features + team_context_features
-outcome_features_base = outcome_prematch_features + weather_features
-outcome_features_with_match_stats = outcome_features_base + match_stats_features
+match_stats_model_features = outcome_prematch_features + weather_features
+outcome_signal_input_features_base = outcome_prematch_features + weather_features
+outcome_signal_input_features_with_match_stats = outcome_signal_input_features_base + match_stats_features
+outcome_features_base = outcome_signal_input_features_base
+outcome_features_with_match_stats = outcome_signal_input_features_with_match_stats
 count_match_stats_features = [
     'HomeShots', 'AwayShots',
     'HomeShotsOnTarget', 'AwayShotsOnTarget',
@@ -481,6 +456,44 @@ count_match_stats_features = [
     'HomeCorners', 'AwayCorners'
 ]
 
+GENERAL_SIGNAL_GROUP_SPECS = {
+    'GoalCreation': [
+        {'weight_name': 'General_GoalCreation_XG', 'home': 'HomeXG', 'away': 'AwayXG', 'invert': False},
+        {'weight_name': 'General_GoalCreation_ShotsOnTarget', 'home': 'HomeShotsOnTarget', 'away': 'AwayShotsOnTarget', 'invert': False},
+        {'weight_name': 'General_GoalCreation_Shots', 'home': 'HomeShots', 'away': 'AwayShots', 'invert': False}
+    ],
+    'GameControl': [
+        {'weight_name': 'General_GameControl_Possession', 'home': 'HomePossession', 'away': 'AwayPossession', 'invert': False},
+        {'weight_name': 'General_GameControl_Passes', 'home': 'HomePasses', 'away': 'AwayPasses', 'invert': False},
+        {'weight_name': 'General_GameControl_PassAccuracy', 'home': 'HomePassAccuracy', 'away': 'AwayPassAccuracy', 'invert': False}
+    ],
+    'DisciplineSetPiece': [
+        {'weight_name': 'General_DisciplineSetPiece_Fouls', 'home': 'HomeFouls', 'away': 'AwayFouls', 'invert': True},
+        {'weight_name': 'General_DisciplineSetPiece_YellowCard', 'home': 'HomeYellowCard', 'away': 'AwayYellowCard', 'invert': True},
+        {'weight_name': 'General_DisciplineSetPiece_RedCard', 'home': 'HomeRedCard', 'away': 'AwayRedCard', 'invert': True},
+        {'weight_name': 'General_DisciplineSetPiece_Corners', 'home': 'HomeCorners', 'away': 'AwayCorners', 'invert': False},
+        {'weight_name': 'General_DisciplineSetPiece_Offsides', 'home': 'HomeOffsides', 'away': 'AwayOffsides', 'invert': True}
+    ]
+}
+
+H2H_SIGNAL_SPECS = [
+    {'weight_name': f'H2H_{feat}', 'column': feat}
+    for feat in h2h_base_features
+]
+WEATHER_CONTEXT_SPECS = [
+    {'weight_name': f'WeatherContext_{feat}', 'column': feat}
+    for feat in weather_features
+]
+BASE_MULTIPLIER_PARAMETER_NAMES = [
+    'BaseMultiplier_General',
+    'BaseMultiplier_H2H',
+    'BaseMultiplier_Player'
+]
+BASE_SIGNAL_FEATURES = [
+    'General_BaseSignal',
+    'H2H_BaseSignal',
+    'Player_BaseSignal'
+]
 required_feature_columns = list(dict.fromkeys(
     match_stats_model_features + match_stats_features + ['HomeGoals', 'AwayGoals']
 ))
@@ -592,6 +605,8 @@ def append_to_run_history(history_path, summary_df):
             existing_mode_history['SourcePredictionMode'] = existing_mode_history['PredictionMode']
         else:
             existing_mode_history['SourcePredictionMode'] = 'reference'
+    if not existing_mode_history.empty and 'FeatureSchemaVersion' not in existing_mode_history.columns:
+        existing_mode_history['FeatureSchemaVersion'] = 'legacy_v1'
 
     if existing_mode_history.empty:
         history_updated = summary_df.copy()
@@ -600,7 +615,7 @@ def append_to_run_history(history_path, summary_df):
             existing_mode_history.to_dict('records') + summary_df.to_dict('records')
         )
 
-    dedupe_cols = [col for col in ['PredictionSource', 'MatchStatsMode', 'BatchID', 'RunID'] if col in history_updated.columns]
+    dedupe_cols = [col for col in ['PredictionSource', 'MatchStatsMode', 'FeatureSchemaVersion', 'BatchID', 'RunID'] if col in history_updated.columns]
     if dedupe_cols:
         history_updated = history_updated.drop_duplicates(subset=dedupe_cols, keep='last')
 
@@ -654,7 +669,7 @@ def append_future_vs_reference_metrics(metrics_path, summary_df):
     dedupe_cols = [c for c in [
         'EvaluationTimestamp', 'EvaluationType',
         'PredictionSource', 'SourcePredictionMode', 'MatchStatsMode',
-        'BatchID', 'RunID'
+        'FeatureSchemaVersion', 'BatchID', 'RunID'
     ] if c in updated.columns]
     if dedupe_cols:
         updated = updated.drop_duplicates(subset=dedupe_cols, keep='last')
@@ -718,6 +733,10 @@ def try_backfill_reference_from_future(ref_results):
         scored = run_df.copy()
         source_prediction_mode = first_non_null_value(scored['PredictionMode'].tolist(), 'future')
         match_stats_mode = first_non_null_value(scored['MatchStatsMode'].tolist(), 'predicted')
+        feature_schema_version = first_non_null_value(
+            scored['FeatureSchemaVersion'].tolist() if 'FeatureSchemaVersion' in scored.columns else [],
+            FEATURE_SCHEMA_VERSION
+        )
         batch_id = first_non_null_value(scored['BatchID'].tolist() if 'BatchID' in scored.columns else [], 1)
         h2h_k = first_non_null_value(scored['H2H_K'].tolist() if 'H2H_K' in scored.columns else [], H2H_K_DEFAULT)
 
@@ -795,6 +814,7 @@ def try_backfill_reference_from_future(ref_results):
         scored['PredictionMode'] = 'reference'
         scored['PredictionSource'] = 'future_backfill'
         scored['MatchStatsMode'] = match_stats_mode
+        scored['FeatureSchemaVersion'] = feature_schema_version
         scored['RunResolvedAvgNLL'] = resolved_run_nll
         scored['RunResolvedAccuracy'] = resolved_run_accuracy
         scored['RunMetricSource'] = metric_source
@@ -810,6 +830,7 @@ def try_backfill_reference_from_future(ref_results):
             'PredictionSource': 'future_backfill',
             'SourcePredictionMode': source_prediction_mode,
             'MatchStatsMode': match_stats_mode,
+            'FeatureSchemaVersion': feature_schema_version,
             'H2H_K': h2h_k,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
@@ -898,7 +919,7 @@ def postprocess_match_stats(pred_df):
         home_pos = pd.to_numeric(processed['HomePossession'], errors='coerce')
         away_pos = pd.to_numeric(processed['AwayPossession'], errors='coerce')
         total = home_pos + away_pos
-        valid = total > 0
+        valid = home_pos.notna() & away_pos.notna() & (total > 0)
         processed.loc[valid, 'HomePossession'] = 100.0 * home_pos.loc[valid] / total.loc[valid]
         processed.loc[valid, 'AwayPossession'] = 100.0 - processed.loc[valid, 'HomePossession']
         processed.loc[~valid, 'HomePossession'] = 50.0
@@ -957,9 +978,7 @@ def build_match_stats_predictions(train_df, predict_df, feature_cols, target_col
 
                 remaining_mask = train_target_pred.isna()
                 if remaining_mask.any():
-                    train_target_pred.loc[remaining_mask] = model.predict(
-                        imputer.transform(train_df.loc[remaining_mask, feature_cols])
-                    )
+                    train_target_pred.loc[remaining_mask] = fallback_value
                 if not predict_df.empty:
                     predict_target_pred = pd.Series(
                         model.predict(imputer.transform(predict_df[feature_cols])),
@@ -1008,17 +1027,17 @@ def apply_match_stats_mode(train_df, predict_df, raw_predict_df):
     )
 
     for col in match_stats_features:
-        train_enriched[col] = train_stats_pred[col].values
-        predict_enriched[col] = predict_stats_pred[col].values
+        train_enriched[col] = train_stats_pred[col].reindex(train_enriched.index)
+        predict_enriched[col] = predict_stats_pred[col].reindex(predict_enriched.index)
 
     predicted_stats_output = raw_predict_df[['MatchID', 'MatchDate', 'HomeTeam', 'AwayTeam']].copy()
     predicted_stats_output['PredictionMode'] = PREDICTION_MODE
     predicted_stats_output['MatchStatsMode'] = MATCH_STATS_MODE
     predicted_stats_output['MatchStatsModel'] = MATCH_STATS_MODEL
     for col in match_stats_features:
-        predicted_stats_output[col] = predict_stats_pred[col].values
+        predicted_stats_output[col] = predict_stats_pred[col].reindex(predicted_stats_output.index)
         if col in raw_predict_df.columns:
-            predicted_stats_output[f'Actual_{col}'] = raw_predict_df[col].values
+            predicted_stats_output[f'Actual_{col}'] = raw_predict_df[col].reindex(predicted_stats_output.index)
 
     return (
         train_enriched,
@@ -1027,6 +1046,110 @@ def apply_match_stats_mode(train_df, predict_df, raw_predict_df):
         predicted_stats_output,
         match_stats_summary
     )
+
+
+def resolve_weight_value(weight_map, key, default_value=1.0):
+    raw_value = weight_map.get(key, default_value)
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return float(default_value)
+    if not math.isfinite(value):
+        return float(default_value)
+    return value
+
+
+def collect_weight_parameter_names(match_stats_mode):
+    params = []
+    if match_stats_mode != 'off':
+        for subgroup in GENERAL_SIGNAL_GROUP_SPECS.values():
+            params.extend(spec['weight_name'] for spec in subgroup)
+    params.extend(spec['weight_name'] for spec in H2H_SIGNAL_SPECS)
+    params.extend(spec['weight_name'] for spec in WEATHER_CONTEXT_SPECS)
+    params.extend(BASE_MULTIPLIER_PARAMETER_NAMES)
+    return params
+
+
+def weighted_signal_from_specs(signal_df, specs, weight_map):
+    if signal_df.empty or not specs:
+        return pd.Series(0.0, index=signal_df.index, dtype='float64')
+
+    weighted_sum = pd.Series(0.0, index=signal_df.index, dtype='float64')
+    total_weight = 0.0
+
+    for spec in specs:
+        weight_name = spec['weight_name']
+        w = resolve_weight_value(weight_map, weight_name, 1.0)
+        if w <= 0:
+            continue
+
+        if 'column' in spec:
+            col = spec['column']
+            if col in signal_df.columns:
+                values = pd.to_numeric(signal_df[col], errors='coerce')
+            else:
+                values = pd.Series(0.0, index=signal_df.index, dtype='float64')
+        else:
+            home_col = spec['home']
+            away_col = spec['away']
+            if home_col in signal_df.columns and away_col in signal_df.columns:
+                home_vals = pd.to_numeric(signal_df[home_col], errors='coerce')
+                away_vals = pd.to_numeric(signal_df[away_col], errors='coerce')
+                if spec.get('invert', False):
+                    values = away_vals - home_vals
+                else:
+                    values = home_vals - away_vals
+            else:
+                values = pd.Series(0.0, index=signal_df.index, dtype='float64')
+
+        weighted_sum = weighted_sum + values.fillna(0.0) * w
+        total_weight += w
+
+    if total_weight <= 0:
+        return pd.Series(0.0, index=signal_df.index, dtype='float64')
+    return weighted_sum / total_weight
+
+
+def build_outcome_design_matrix(signal_df, weight_map, match_stats_mode):
+    design = pd.DataFrame(index=signal_df.index)
+
+    if match_stats_mode == 'off':
+        general_signal = pd.Series(0.0, index=signal_df.index, dtype='float64')
+    else:
+        subgroup_signals = {}
+        for subgroup_name, specs in GENERAL_SIGNAL_GROUP_SPECS.items():
+            subgroup_signals[subgroup_name] = weighted_signal_from_specs(signal_df, specs, weight_map)
+
+        general_signal = pd.Series(0.0, index=signal_df.index, dtype='float64')
+        for subgroup_name, blend_weight in GENERAL_SUBGROUP_BLEND.items():
+            general_signal = general_signal + subgroup_signals.get(
+                subgroup_name,
+                pd.Series(0.0, index=signal_df.index, dtype='float64')
+            ) * float(blend_weight)
+
+    general_multiplier = resolve_weight_value(weight_map, 'BaseMultiplier_General', 1.0)
+    h2h_multiplier = resolve_weight_value(weight_map, 'BaseMultiplier_H2H', 1.0)
+    player_multiplier = resolve_weight_value(weight_map, 'BaseMultiplier_Player', 1.0)
+
+    h2h_signal = weighted_signal_from_specs(signal_df, H2H_SIGNAL_SPECS, weight_map)
+    player_signal = pd.Series(0.0, index=signal_df.index, dtype='float64')
+
+    design['General_BaseSignal'] = general_signal * general_multiplier
+    design['H2H_BaseSignal'] = h2h_signal * h2h_multiplier
+    design['Player_BaseSignal'] = player_signal * player_multiplier
+
+    for spec in WEATHER_CONTEXT_SPECS:
+        col = spec['column']
+        weight_name = spec['weight_name']
+        w = resolve_weight_value(weight_map, weight_name, 1.0)
+        if col in signal_df.columns:
+            values = pd.to_numeric(signal_df[col], errors='coerce').fillna(0.0)
+        else:
+            values = pd.Series(0.0, index=signal_df.index, dtype='float64')
+        design[col] = values * w
+
+    return design
+
 
 def mean_available(values, default_value=1.25):
     valid = [float(v) for v in values if pd.notna(v)]
@@ -1250,7 +1373,7 @@ def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
     decision['RecommendationLabel'] = decision.apply(recommendation_label, axis=1)
     return decision
 
-def load_run_history(path, weight_cols, match_stats_mode):
+def load_run_history(path, weight_cols, match_stats_mode, source_prediction_mode=None, feature_schema_version=None):
     if not os.path.exists(path):
         return pd.DataFrame()
     try:
@@ -1259,9 +1382,22 @@ def load_run_history(path, weight_cols, match_stats_mode):
         return pd.DataFrame()
     if 'MatchStatsMode' not in hist.columns:
         hist['MatchStatsMode'] = 'actual'
+    if 'SourcePredictionMode' not in hist.columns:
+        if 'PredictionMode' in hist.columns:
+            hist['SourcePredictionMode'] = hist['PredictionMode']
+        else:
+            hist['SourcePredictionMode'] = 'reference'
+    if 'FeatureSchemaVersion' not in hist.columns:
+        hist['FeatureSchemaVersion'] = 'legacy_v1'
+
     hist = hist[hist['MatchStatsMode'] == match_stats_mode].copy()
+    if source_prediction_mode is not None:
+        hist = hist[hist['SourcePredictionMode'] == source_prediction_mode].copy()
+    if feature_schema_version is not None:
+        hist = hist[hist['FeatureSchemaVersion'] == feature_schema_version].copy()
     if hist.empty:
         return hist
+
     for col in weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K']:
         if col not in hist.columns:
             hist[col] = float('nan')
@@ -1285,10 +1421,10 @@ def train_surrogate_model(history_df, feature_cols, target_col):
     model.fit(X, y)
     return model
 
-def generate_candidate_df(num, features, k_range):
+def generate_candidate_df(num, weight_parameter_names, k_range):
     rows = []
     for _ in range(num):
-        row = {f'Weight_{feat}': random.random() * 2.0 for feat in features}
+        row = {f'Weight_{param}': random.random() * 2.0 for param in weight_parameter_names}
         row['H2H_K'] = random.randint(int(k_range[0]), int(k_range[1]))
         rows.append(row)
     return pd.DataFrame(rows)
@@ -1371,6 +1507,8 @@ if PREDICTION_MODE == 'reference':
             current_mode_history = history_updated[history_updated['MatchStatsMode'].isin(backfill_modes)].copy()
         else:
             current_mode_history = history_updated.copy()
+        if 'FeatureSchemaVersion' in current_mode_history.columns:
+            current_mode_history = current_mode_history[current_mode_history['FeatureSchemaVersion'] == FEATURE_SCHEMA_VERSION].copy()
 
         decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
         decision_df.to_csv(PARETO_OUT_PATH, index=False)
@@ -1391,12 +1529,13 @@ if PREDICTION_MODE == 'reference':
     train_df = train_df[~train_df['MatchID'].isin(predict_df['MatchID'])].copy()
     print(f"Training matches after excluding reference targets: {len(train_df)}")
 
-train_df, predict_df, features, predicted_match_stats_df, match_stats_summary_df = apply_match_stats_mode(
+train_df, predict_df, signal_input_features, predicted_match_stats_df, match_stats_summary_df = apply_match_stats_mode(
     train_df,
     predict_df,
     raw_predict_df
 )
-weight_cols = [f'Weight_{feat}' for feat in features]
+weight_parameter_names = collect_weight_parameter_names(MATCH_STATS_MODE)
+weight_cols = [f'Weight_{param}' for param in weight_parameter_names]
 
 if MATCH_STATS_MODE == 'predicted':
     if predicted_match_stats_df.empty:
@@ -1414,7 +1553,7 @@ if train_df.empty:
     raise ValueError("Training dataset is empty after applying the selected prediction mode.")
 
 X_train, X_val, y_train, y_val = train_test_split(
-    train_df[features], train_df['GoalDiff'], test_size=0.2, random_state=RANDOM_STATE
+    train_df[signal_input_features], train_df['GoalDiff'], test_size=0.2, random_state=RANDOM_STATE
 )
 
 run_limit = MAX_RUNS if (PREDICTION_MODE == 'future' or ref_results is not None) else 1
@@ -1437,7 +1576,7 @@ if predict_df.empty:
     print(pred_df.head(9))
 else:
     X_train_base = X_train.copy()
-    X_pred_base = predict_df[features].copy()
+    X_pred_base = predict_df[signal_input_features].copy()
 
     draw_margin = 0.5
 
@@ -1451,14 +1590,31 @@ else:
             return 'A'
         return 'D'
 
-    history_df = load_run_history(RUN_HISTORY_SOURCE_PATH, weight_cols, MATCH_STATS_MODE)
+    def resolve_h2h_k(value):
+        try:
+            k_val = float(value)
+        except (TypeError, ValueError):
+            return int(H2H_K_DEFAULT)
+        if not math.isfinite(k_val):
+            return int(H2H_K_DEFAULT)
+        low = int(H2H_K_RANGE[0])
+        high = int(H2H_K_RANGE[1])
+        return max(low, min(high, int(round(k_val))))
+
+    history_df = load_run_history(
+        RUN_HISTORY_SOURCE_PATH,
+        weight_cols,
+        MATCH_STATS_MODE,
+        PREDICTION_MODE,
+        FEATURE_SCHEMA_VERSION
+    )
     use_surrogate = len(history_df) >= SURROGATE_MIN_HISTORY
 
     if use_surrogate:
         feature_cols = weight_cols + ['H2H_K']
         nll_model = train_surrogate_model(history_df, feature_cols, 'AvgNLL')
         acc_model = train_surrogate_model(history_df, feature_cols, 'Accuracy')
-        candidate_df = generate_candidate_df(max(SURROGATE_CANDIDATES, run_limit), features, H2H_K_RANGE)
+        candidate_df = generate_candidate_df(max(SURROGATE_CANDIDATES, run_limit), weight_parameter_names, H2H_K_RANGE)
         pred_nll = nll_model.predict(candidate_df[feature_cols])
         pred_acc = acc_model.predict(candidate_df[feature_cols])
         selected_df = select_candidates_with_surrogate(
@@ -1469,7 +1625,7 @@ else:
             SURROGATE_RANDOM_FRACTION
         )
     else:
-        selected_df = generate_candidate_df(run_limit, features, H2H_K_RANGE)
+        selected_df = generate_candidate_df(run_limit, weight_parameter_names, H2H_K_RANGE)
 
     batch_id = 1
     if not history_df.empty and 'BatchID' in history_df.columns:
@@ -1480,11 +1636,16 @@ else:
 
     for idx, cand in selected_df.iterrows():
         run_id = idx + 1
-        run_k = int(cand['H2H_K'])
+        run_k = resolve_h2h_k(cand['H2H_K'] if 'H2H_K' in cand.index else H2H_K_DEFAULT)
         pred_run_nll = float(cand['Pred_AvgNLL']) if 'Pred_AvgNLL' in cand.index and pd.notna(cand['Pred_AvgNLL']) else float('nan')
         pred_run_acc = float(cand['Pred_Accuracy']) if 'Pred_Accuracy' in cand.index and pd.notna(cand['Pred_Accuracy']) else float('nan')
-        weights = {feat: float(cand[f'Weight_{feat}']) for feat in features}
-        weight_vec = pd.Series(weights, index=features).values
+        weights = {}
+        for param in weight_parameter_names:
+            col_name = f'Weight_{param}'
+            if col_name in cand.index and pd.notna(cand[col_name]):
+                weights[param] = float(cand[col_name])
+            else:
+                weights[param] = 1.0
 
         X_train_scaled = apply_h2h_scaling(X_train_base, run_k)
         X_pred_scaled = apply_h2h_scaling(X_pred_base, run_k)
@@ -1496,22 +1657,31 @@ else:
             )
 
         imputer = SimpleImputer(strategy='median')
-        X_train_imp = imputer.fit_transform(X_train_scaled)
-        X_pred_imp = imputer.transform(X_pred_scaled)
+        X_train_imp = pd.DataFrame(
+            imputer.fit_transform(X_train_scaled),
+            columns=X_train_scaled.columns,
+            index=X_train_scaled.index
+        )
+        X_pred_imp = pd.DataFrame(
+            imputer.transform(X_pred_scaled),
+            columns=X_pred_scaled.columns,
+            index=X_pred_scaled.index
+        )
 
-        X_train_w = X_train_imp * weight_vec
+        X_train_w = build_outcome_design_matrix(X_train_imp, weights, MATCH_STATS_MODE)
+        X_pred_w = build_outcome_design_matrix(X_pred_imp, weights, MATCH_STATS_MODE)
+
         # Use a single worker to avoid multiprocessing pipe permission issues on restricted hosts.
         model = SklearnModel(n_trees=50, n_jobs=1)
-        model.fit(X_train_w, y_train.values)
+        model.fit(X_train_w.values, y_train.values)
 
-        train_preds = model.predict(X_train_w)
+        train_preds = model.predict(X_train_w.values)
         residuals = y_train.values - train_preds
         sigma = float(pd.Series(residuals).std())
         if not math.isfinite(sigma) or sigma <= 0:
             sigma = 1.0
 
-        X_pred_w = X_pred_imp * weight_vec
-        preds = model.predict(X_pred_w)
+        preds = model.predict(X_pred_w.values)
 
         win_probs = []
         draw_probs = []
@@ -1539,6 +1709,7 @@ else:
         pred_df['PredictionSource'] = 'simulation'
         pred_df['SourcePredictionMode'] = PREDICTION_MODE
         pred_df['MatchStatsMode'] = MATCH_STATS_MODE
+        pred_df['FeatureSchemaVersion'] = FEATURE_SCHEMA_VERSION
         pred_df['WinProb'] = win_probs
         pred_df['DrawProb'] = draw_probs
         pred_df['LoseProb'] = lose_probs
@@ -1550,6 +1721,10 @@ else:
         pred_df['PredictedGoalDiff'] = preds
         pred_df['PredictedResult'] = pred_df[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
         pred_df['PredictedResult'] = pred_df['PredictedResult'].map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
+
+        for base_col in BASE_SIGNAL_FEATURES:
+            if base_col in X_pred_w.columns:
+                pred_df[base_col] = X_pred_w[base_col].values
 
         score_estimates = [
             estimate_scoreline(predict_df.loc[idx], pred_df.at[idx, 'PredictedGoalDiff'], pred_df.at[idx, 'PredictedResult'])
@@ -1570,8 +1745,8 @@ else:
         if 'H2H_Venue_MatchCount' in predict_df.columns:
             pred_df['H2H_Venue_MatchCount'] = predict_df['H2H_Venue_MatchCount'].values
 
-        for feat in features:
-            pred_df[f'Weight_{feat}'] = weights[feat]
+        for param in weight_parameter_names:
+            pred_df[f'Weight_{param}'] = weights[param]
 
         if 'H2H_Combined_MatchCount' in pred_df.columns:
             pred_df['H2H_Combined_Alpha'] = pred_df['H2H_Combined_MatchCount'].apply(
@@ -1583,19 +1758,24 @@ else:
             )
 
         if 'H2H_Combined_Alpha' in pred_df.columns:
-            for feat in H2H_COMBINED_FEATURES:
-                if f'Weight_{feat}' in pred_df.columns:
-                    pred_df[f'EffectiveWeight_{feat}'] = pred_df[f'Weight_{feat}'] * pred_df['H2H_Combined_Alpha']
+            for spec in H2H_SIGNAL_SPECS:
+                feat = spec['column']
+                if feat in H2H_COMBINED_FEATURES:
+                    wcol = f"Weight_{spec['weight_name']}"
+                    if wcol in pred_df.columns:
+                        pred_df[f'Effective_{wcol}'] = pred_df[wcol] * pred_df['H2H_Combined_Alpha']
         if 'H2H_Venue_Alpha' in pred_df.columns:
-            for feat in H2H_VENUE_FEATURES:
-                if f'Weight_{feat}' in pred_df.columns:
-                    pred_df[f'EffectiveWeight_{feat}'] = pred_df[f'Weight_{feat}'] * pred_df['H2H_Venue_Alpha']
+            for spec in H2H_SIGNAL_SPECS:
+                feat = spec['column']
+                if feat in H2H_VENUE_FEATURES:
+                    wcol = f"Weight_{spec['weight_name']}"
+                    if wcol in pred_df.columns:
+                        pred_df[f'Effective_{wcol}'] = pred_df[wcol] * pred_df['H2H_Venue_Alpha']
 
         run_score = None
         run_accuracy = None
         run_count = 0
         matched_reference_count = 0
-        early_stop = False
         if ref_results is not None:
             merged = pred_df.merge(
                 ref_results[['HomeGoals', 'AwayGoals', 'Result']],
@@ -1636,11 +1816,7 @@ else:
                 correct_mask = (merged.loc[actual_rows.index, 'PredictedResult'] == actual_rows)
                 run_accuracy = float(correct_mask.mean())
                 run_count = int(correct_mask.count())
-                all_correct = correct_mask.all()
-                if all_correct:
-                    best_run = run_id
-                    best_score = run_score
-                    early_stop = True
+
 
         if run_score is not None:
             if best_score is None or run_score < best_score:
@@ -1689,6 +1865,7 @@ else:
             'PredictionSource': 'simulation',
             'SourcePredictionMode': PREDICTION_MODE,
             'MatchStatsMode': MATCH_STATS_MODE,
+            'FeatureSchemaVersion': FEATURE_SCHEMA_VERSION,
             'H2H_K': run_k,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
@@ -1703,13 +1880,12 @@ else:
             'MeanProbGap': mean_prob_gap,
             'MeanEntropy': mean_entropy
         }
-        for feat in features:
-            metric_row[f'Weight_{feat}'] = weights[feat]
+        for param in weight_parameter_names:
+            metric_row[f'Weight_{param}'] = weights[param]
         run_metrics.append(metric_row)
         all_runs.append(pred_df)
 
-        if early_stop:
-            break
+
 
     all_pred_df = pd.concat(all_runs, ignore_index=True) if all_runs else pred_df.copy()
     all_pred_df.to_csv(PREDICTION_OUT_PATH, index=False)
@@ -1732,6 +1908,8 @@ else:
         current_mode_history = history_updated.copy()
         if 'MatchStatsMode' in current_mode_history.columns:
             current_mode_history = current_mode_history[current_mode_history['MatchStatsMode'] == MATCH_STATS_MODE].copy()
+        if 'FeatureSchemaVersion' in current_mode_history.columns:
+            current_mode_history = current_mode_history[current_mode_history['FeatureSchemaVersion'] == FEATURE_SCHEMA_VERSION].copy()
 
         if PREDICTION_MODE == 'reference':
             decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
