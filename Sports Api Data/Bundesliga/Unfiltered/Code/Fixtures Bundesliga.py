@@ -148,7 +148,10 @@ def fetch_new_fixtures():
 
 
 if __name__ == "__main__":
-    fetch_full_fixtures()
+    if os.path.exists(OUTPUT_FILE):
+        fetch_new_fixtures()
+    else:
+        fetch_full_fixtures()
 
     sched = BlockingScheduler(timezone="Europe/Berlin")
     sched.add_job(fetch_new_fixtures, trigger=CronTrigger(day_of_week="sat,sun,mon", hour="0", minute="0"))

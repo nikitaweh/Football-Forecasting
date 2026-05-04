@@ -17,6 +17,9 @@ TESTRUNS_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns'
 FUTURE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection future')
 REFERENCE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection reference')
 WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
+LINEUPS_PATH = os.path.join(DATA_PATH, 'lineups_league_78.csv')
+INJURIES_PATH = os.path.join(DATA_PATH, 'injuries_league_78.csv')
+PLAYER_STATS_PATH = os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv')
 MAX_RUNS = 20
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
@@ -62,7 +65,7 @@ RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.
 RUN_HISTORY_PATH = os.path.join(OUTPUT_PATH, 'surrogate_run_history.csv')
 PARETO_OUT_PATH = DECISION_OUT_PATH
 FUTURE_OUTCOME_TABLE_PATH = os.path.join(OUTPUT_PATH, 'future_outcome_table.csv')
-WEATHER_FUTURE_PATH = os.path.join(OUTPUT_PATH, 'weather_data.csv')
+WEATHER_FUTURE_PATH = os.path.join(DATA_PATH, 'future_weather_data_78.csv')
 PREDICTED_MATCH_STATS_OUT_PATH = os.path.join(OUTPUT_PATH, 'predicted_match_stats.csv')
 FUTURE_PREDICTION_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_runs.csv')
 FUTURE_RUN_SUMMARY_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_run_summary.csv')
@@ -86,6 +89,16 @@ GENERAL_SUBGROUP_BLEND = {
     'GoalCreation': 0.55,
     'GameControl': 0.30,
     'DisciplineSetPiece': 0.15
+}
+
+PLAYER_MIN_APPEARANCES = 5
+PLAYER_ROLLING_WINDOW = 8
+PLAYER_STARTPROB_FALLBACK = 0.15
+PLAYER_POSITION_IMPORTANCE = {
+    'GK': 1.15,
+    'DEF': 1.00,
+    'MID': 1.05,
+    'FWD': 1.10
 }
 
 # 1. Laden
@@ -177,7 +190,8 @@ weather_future = load_weather(WEATHER_FUTURE_PATH)
 if not weather_hist.empty or not weather_future.empty:
     weather_all = pd.concat([weather_hist, weather_future], ignore_index=True)
     weather_all = weather_all.dropna(subset=['MatchID'])
-    weather_all = weather_all.drop_duplicates(subset=['MatchID'], keep='last')
+    numeric_weather_cols = [c for c in weather_all.columns if c not in ('MatchID',) and weather_all[c].dtype in (float, 'float64', 'float32', int, 'int64')]
+    weather_all = weather_all.groupby('MatchID', as_index=False)[numeric_weather_cols].mean()
     df = df.merge(weather_all, on='MatchID', how='left')
 
 # Team-Form und Grundstärke (historisch + Rolling)
@@ -293,6 +307,471 @@ def apply_h2h_scaling(feature_df, k):
                 df_scaled[col] = df_scaled[col] * alpha_v
     return df_scaled
 
+def build_player_base_features(df_src):
+    result_cols = [
+        'MatchID',
+        'Home_PlayerBaseScore', 'Away_PlayerBaseScore',
+        'Home_PlayerAbsencePenalty', 'Away_PlayerAbsencePenalty',
+        'Player_BaseDiff', 'Player_AbsencePenaltyDiff'
+    ]
+    match_meta = df_src[[
+        'MatchID', 'MatchDate', 'HomeTeamID', 'AwayTeamID',
+        'HomeTeam', 'AwayTeam', 'Played'
+    ]].drop_duplicates(subset=['MatchID']).copy()
+    for col in ['Home_PlayerBaseScore', 'Away_PlayerBaseScore', 'Home_PlayerAbsencePenalty', 'Away_PlayerAbsencePenalty']:
+        match_meta[col] = 0.0
+
+    def safe_read_csv(path):
+        if not path or not os.path.exists(path):
+            return pd.DataFrame()
+        try:
+            return pd.read_csv(path)
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame()
+
+    def to_int_id(value):
+        if pd.isna(value):
+            return None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    def parse_start_flag(value):
+        if isinstance(value, bool):
+            return bool(value)
+        return str(value).strip().lower() in {'true', '1', 'yes', 'y'}
+
+    def normalize_position(value):
+        key = str(value).strip().upper()
+        if key in {'G', 'GK', 'GOALKEEPER'}:
+            return 'GK'
+        if key in {'D', 'DEF'}:
+            return 'DEF'
+        if key in {'M', 'MID'}:
+            return 'MID'
+        if key in {'F', 'FW', 'FWD'}:
+            return 'FWD'
+        return 'MID'
+
+    def normalize_team_name(value):
+        return str(value).strip().lower()
+
+    match_meta['MatchDate'] = pd.to_datetime(match_meta['MatchDate'], errors='coerce')
+    match_meta['MatchID'] = pd.to_numeric(match_meta['MatchID'], errors='coerce')
+    match_meta = match_meta.dropna(subset=['MatchID']).copy()
+    match_meta['MatchID'] = match_meta['MatchID'].astype(int)
+
+    for col in ['HomeTeamID', 'AwayTeamID']:
+        match_meta[col] = pd.to_numeric(match_meta[col], errors='coerce')
+
+    lineups = safe_read_csv(LINEUPS_PATH)
+    injuries = safe_read_csv(INJURIES_PATH)
+    player_stats = safe_read_csv(PLAYER_STATS_PATH)
+    if player_stats.empty:
+        out = match_meta[['MatchID']].copy()
+        for col in result_cols[1:]:
+            out[col] = 0.0
+        return out[result_cols]
+
+    stats_rename = {
+        'Team ID': 'TeamID',
+        'Player ID': 'PlayerID',
+        'Minutes Played': 'MinutesPlayed',
+        'Total Goals': 'TotalGoals',
+        'Assists': 'Assists',
+        'Total Shots': 'TotalShots',
+        'Shots on Target': 'ShotsOnTarget',
+        'Passes': 'Passes',
+        'Pass Accuracy': 'PassAccuracy',
+        'Tackles': 'Tackles',
+        'Interceptions': 'Interceptions',
+        'Duels Won': 'DuelsWon',
+        'Yellow Cards': 'YellowCards',
+        'Red Cards': 'RedCards',
+        'Rating': 'Rating'
+    }
+    player_stats = player_stats.rename(columns=stats_rename)
+
+    for col in ['MatchID', 'TeamID', 'PlayerID']:
+        if col not in player_stats.columns:
+            player_stats[col] = float('nan')
+        player_stats[col] = pd.to_numeric(player_stats[col], errors='coerce')
+
+    numeric_cols = [
+        'MinutesPlayed', 'TotalGoals', 'Assists', 'TotalShots', 'ShotsOnTarget',
+        'Passes', 'Tackles', 'Interceptions', 'DuelsWon', 'YellowCards', 'RedCards', 'Rating'
+    ]
+    for col in numeric_cols:
+        if col not in player_stats.columns:
+            player_stats[col] = float('nan')
+
+    if 'PassAccuracy' not in player_stats.columns:
+        player_stats['PassAccuracy'] = float('nan')
+    player_stats['PassAccuracy'] = pd.to_numeric(
+        player_stats['PassAccuracy'].astype(str).str.replace('%', '', regex=False),
+        errors='coerce'
+    )
+
+    player_stats = player_stats.merge(
+        match_meta[['MatchID', 'MatchDate', 'Played']],
+        on='MatchID',
+        how='left'
+    )
+    player_stats = player_stats.dropna(subset=['MatchID', 'TeamID', 'PlayerID', 'MatchDate']).copy()
+    player_stats['MatchID'] = player_stats['MatchID'].astype(int)
+    player_stats['TeamID'] = player_stats['TeamID'].astype(int)
+    player_stats['PlayerID'] = player_stats['PlayerID'].astype(int)
+
+    lineups_match = pd.DataFrame(columns=['MatchID', 'TeamID', 'PlayerID', 'StartXI', 'PositionGroup'])
+    if not lineups.empty:
+        lineups = lineups.rename(columns={
+            'Home Team ID': 'HomeTeamID',
+            'Away Team ID': 'AwayTeamID',
+            'Player ID': 'PlayerID',
+            'Team Name': 'TeamName',
+            'Pos': 'PosRaw'
+        })
+        for col in ['MatchID', 'PlayerID']:
+            if col not in lineups.columns:
+                lineups[col] = float('nan')
+            lineups[col] = pd.to_numeric(lineups[col], errors='coerce')
+
+        if 'StartXI' not in lineups.columns:
+            lineups['StartXI'] = False
+        lineups['StartXI'] = lineups['StartXI'].apply(parse_start_flag)
+
+        if 'PosRaw' not in lineups.columns:
+            lineups['PosRaw'] = ''
+        lineups['PositionGroup'] = lineups['PosRaw'].apply(normalize_position)
+
+        team_name_to_id = {}
+        for _, row in match_meta[['HomeTeam', 'HomeTeamID']].dropna().drop_duplicates().iterrows():
+            team_name_to_id[normalize_team_name(row['HomeTeam'])] = to_int_id(row['HomeTeamID'])
+        for _, row in match_meta[['AwayTeam', 'AwayTeamID']].dropna().drop_duplicates().iterrows():
+            team_name_to_id[normalize_team_name(row['AwayTeam'])] = to_int_id(row['AwayTeamID'])
+
+        if 'TeamName' in lineups.columns:
+            lineups['TeamID'] = lineups['TeamName'].apply(lambda n: team_name_to_id.get(normalize_team_name(n)))
+        else:
+            lineups['TeamID'] = float('nan')
+
+        infer_team = player_stats[['MatchID', 'PlayerID', 'TeamID']].drop_duplicates(subset=['MatchID', 'PlayerID', 'TeamID'])
+        lineups = lineups.merge(
+            infer_team.rename(columns={'TeamID': 'TeamID_FromStats'}),
+            on=['MatchID', 'PlayerID'],
+            how='left'
+        )
+        lineups['TeamID'] = pd.to_numeric(lineups['TeamID'], errors='coerce')
+        lineups['TeamID'] = lineups['TeamID'].fillna(lineups['TeamID_FromStats'])
+
+        lineups = lineups.dropna(subset=['MatchID', 'PlayerID', 'TeamID']).copy()
+        lineups['MatchID'] = lineups['MatchID'].astype(int)
+        lineups['PlayerID'] = lineups['PlayerID'].astype(int)
+        lineups['TeamID'] = lineups['TeamID'].astype(int)
+
+        lineups_match = lineups[['MatchID', 'TeamID', 'PlayerID', 'StartXI', 'PositionGroup']].drop_duplicates(
+            subset=['MatchID', 'TeamID', 'PlayerID'],
+            keep='last'
+        )
+
+    player_stats = player_stats.merge(
+        lineups_match,
+        on=['MatchID', 'TeamID', 'PlayerID'],
+        how='left'
+    )
+
+    if not lineups_match.empty:
+        starter_pos_map = lineups_match[lineups_match['StartXI']].groupby(['TeamID', 'PlayerID'])['PositionGroup'].agg(
+            lambda s: s.mode().iloc[0] if not s.mode().empty else 'MID'
+        )
+        player_stats = player_stats.set_index(['TeamID', 'PlayerID'])
+        player_stats['PositionGroup'] = player_stats['PositionGroup'].fillna(starter_pos_map)
+        player_stats = player_stats.reset_index()
+
+    player_stats['PositionGroup'] = player_stats['PositionGroup'].fillna('MID').apply(normalize_position)
+
+    minutes_factor = pd.to_numeric(player_stats['MinutesPlayed'], errors='coerce').clip(lower=0, upper=90).fillna(0.0) / 90.0
+    goals = pd.to_numeric(player_stats['TotalGoals'], errors='coerce').fillna(0.0)
+    assists = pd.to_numeric(player_stats['Assists'], errors='coerce').fillna(0.0)
+    shots_on_target = pd.to_numeric(player_stats['ShotsOnTarget'], errors='coerce').fillna(0.0)
+    total_shots = pd.to_numeric(player_stats['TotalShots'], errors='coerce').fillna(0.0)
+    tackles = pd.to_numeric(player_stats['Tackles'], errors='coerce').fillna(0.0)
+    interceptions = pd.to_numeric(player_stats['Interceptions'], errors='coerce').fillna(0.0)
+    duels_won = pd.to_numeric(player_stats['DuelsWon'], errors='coerce').fillna(0.0)
+    yellow = pd.to_numeric(player_stats['YellowCards'], errors='coerce').fillna(0.0)
+    red = pd.to_numeric(player_stats['RedCards'], errors='coerce').fillna(0.0)
+    rating = pd.to_numeric(player_stats['Rating'], errors='coerce')
+    rating_norm = ((rating - 6.0) / 2.0).clip(lower=-1.0, upper=2.0).fillna(0.0)
+
+    raw_score = (
+        0.35 * goals
+        + 0.25 * assists
+        + 0.08 * shots_on_target
+        + 0.04 * total_shots
+        + 0.06 * tackles
+        + 0.06 * interceptions
+        + 0.05 * duels_won
+        + 0.11 * rating_norm
+        - 0.08 * yellow
+        - 0.25 * red
+    )
+    player_stats['PlayerMatchScore'] = minutes_factor * raw_score
+
+    player_stats = player_stats.sort_values(['PlayerID', 'MatchDate', 'MatchID']).copy()
+    player_stats['PlayerRollingScore'] = (
+        player_stats.groupby('PlayerID')['PlayerMatchScore']
+        .transform(lambda s: s.shift(1).rolling(PLAYER_ROLLING_WINDOW, min_periods=1).mean())
+    )
+    player_stats['PlayerPriorAppearances'] = player_stats.groupby('PlayerID').cumcount()
+
+    qualified = player_stats[
+        (player_stats['PlayerPriorAppearances'] >= PLAYER_MIN_APPEARANCES)
+        & player_stats['PlayerRollingScore'].notna()
+    ].copy()
+    if qualified.empty:
+        qualified = player_stats[player_stats['PlayerRollingScore'].notna()].copy()
+
+    global_fallback = float(qualified['PlayerRollingScore'].median()) if not qualified.empty else 0.0
+    team_medians = qualified.groupby('TeamID')['PlayerRollingScore'].median().to_dict() if not qualified.empty else {}
+    pos_medians = qualified.groupby('PositionGroup')['PlayerRollingScore'].median().to_dict() if not qualified.empty else {}
+    team_pos_medians = qualified.groupby(['TeamID', 'PositionGroup'])['PlayerRollingScore'].median().to_dict() if not qualified.empty else {}
+
+    def fallback_score(team_id, position_group):
+        pos = normalize_position(position_group)
+        team_key = to_int_id(team_id)
+        if team_key is not None and (team_key, pos) in team_pos_medians and pd.notna(team_pos_medians[(team_key, pos)]):
+            return float(team_pos_medians[(team_key, pos)])
+        if team_key is not None and team_key in team_medians and pd.notna(team_medians[team_key]):
+            return float(team_medians[team_key])
+        if pos in pos_medians and pd.notna(pos_medians[pos]):
+            return float(pos_medians[pos])
+        return float(global_fallback)
+
+    position_weight = {
+        pos: float(weight)
+        for pos, weight in PLAYER_POSITION_IMPORTANCE.items()
+    }
+
+    played_match_ids = set(match_meta.loc[match_meta['Played'] == True, 'MatchID'].tolist())
+    team_feature_rows = []
+
+    if not lineups_match.empty:
+        starter_rows = lineups_match[
+            (lineups_match['StartXI'])
+            & (lineups_match['MatchID'].isin(played_match_ids))
+        ].copy()
+        starter_rows = starter_rows.merge(
+            player_stats[['MatchID', 'TeamID', 'PlayerID', 'PlayerRollingScore', 'PlayerPriorAppearances', 'PositionGroup']],
+            on=['MatchID', 'TeamID', 'PlayerID'],
+            how='left',
+            suffixes=('', '_Stats')
+        )
+        starter_rows['PosFinal'] = starter_rows['PositionGroup'].combine_first(starter_rows.get('PositionGroup_Stats', pd.Series(index=starter_rows.index, dtype='object')))
+        starter_rows['PosFinal'] = starter_rows['PosFinal'].fillna('MID').apply(normalize_position)
+        starter_rows['PosWeight'] = starter_rows['PosFinal'].map(position_weight).fillna(1.0)
+
+        valid_hist = (
+            pd.to_numeric(starter_rows['PlayerPriorAppearances'], errors='coerce').fillna(0) >= PLAYER_MIN_APPEARANCES
+        ) & pd.to_numeric(starter_rows['PlayerRollingScore'], errors='coerce').notna()
+        starter_rows['EffectiveScore'] = pd.to_numeric(starter_rows['PlayerRollingScore'], errors='coerce')
+
+        missing_mask = ~valid_hist
+        if missing_mask.any():
+            starter_rows.loc[missing_mask, 'EffectiveScore'] = starter_rows.loc[missing_mask].apply(
+                lambda r: fallback_score(r['TeamID'], r['PosFinal']),
+                axis=1
+            )
+
+        starter_rows['WeightedScore'] = starter_rows['EffectiveScore'] * starter_rows['PosWeight']
+        agg = starter_rows.groupby(['MatchID', 'TeamID'], as_index=False).agg(
+            WeightedScoreSum=('WeightedScore', 'sum'),
+            WeightSum=('PosWeight', 'sum')
+        )
+        agg['PlayerTeamScore'] = agg['WeightedScoreSum'] / agg['WeightSum'].replace(0, float('nan'))
+        agg['PlayerTeamScore'] = agg['PlayerTeamScore'].fillna(global_fallback)
+        agg['AbsencePenalty'] = 0.0
+
+        for _, r in agg.iterrows():
+            team_feature_rows.append({
+                'MatchID': int(r['MatchID']),
+                'TeamID': int(r['TeamID']),
+                'PlayerTeamScore': float(r['PlayerTeamScore']),
+                'AbsencePenalty': float(r['AbsencePenalty'])
+            })
+
+    start_hist = pd.DataFrame(columns=['MatchID', 'TeamID', 'PlayerID', 'PositionGroup', 'StartRate'])
+    if not lineups_match.empty:
+        start_hist = lineups_match.merge(
+            match_meta[['MatchID', 'MatchDate']],
+            on='MatchID',
+            how='left'
+        )
+        start_hist = start_hist.dropna(subset=['MatchDate']).sort_values(['TeamID', 'PlayerID', 'MatchDate'])
+        start_hist['StarterNumeric'] = start_hist['StartXI'].astype(float)
+
+    start_rate_map = {}
+    if not start_hist.empty:
+        start_rate_map = start_hist.groupby(['TeamID', 'PlayerID'])['StarterNumeric'].mean().to_dict()
+
+    stats_players = player_stats[['TeamID', 'PlayerID', 'PositionGroup']].drop_duplicates(subset=['TeamID', 'PlayerID'])
+    roster_rows = []
+    for _, r in stats_players.iterrows():
+        team_id = to_int_id(r['TeamID'])
+        player_id = to_int_id(r['PlayerID'])
+        if team_id is None or player_id is None:
+            continue
+        roster_rows.append({
+            'TeamID': team_id,
+            'PlayerID': player_id,
+            'PositionGroup': normalize_position(r['PositionGroup']),
+            'StartRate': float(start_rate_map.get((team_id, player_id), PLAYER_STARTPROB_FALLBACK))
+        })
+
+    roster_df = pd.DataFrame(roster_rows)
+    roster_by_team = {}
+    if not roster_df.empty:
+        for team_id, grp in roster_df.groupby('TeamID'):
+            roster_by_team[int(team_id)] = grp.to_dict('records')
+
+    profile_tables = {}
+    for (team_id, player_id), grp in player_stats.groupby(['TeamID', 'PlayerID']):
+        profile_tables[(int(team_id), int(player_id))] = grp[['MatchDate', 'PlayerRollingScore', 'PlayerPriorAppearances', 'PositionGroup']].sort_values('MatchDate')
+
+    def latest_profile(team_id, player_id, match_date):
+        table = profile_tables.get((team_id, player_id))
+        if table is None or pd.isna(match_date):
+            return float('nan'), 0, 'MID'
+        prior = table[table['MatchDate'] < match_date]
+        if prior.empty:
+            last_pos = table['PositionGroup'].dropna().iloc[-1] if not table['PositionGroup'].dropna().empty else 'MID'
+            return float('nan'), 0, normalize_position(last_pos)
+        row = prior.iloc[-1]
+        return (
+            float(row['PlayerRollingScore']) if pd.notna(row['PlayerRollingScore']) else float('nan'),
+            int(row['PlayerPriorAppearances']) if pd.notna(row['PlayerPriorAppearances']) else 0,
+            normalize_position(row['PositionGroup'])
+        )
+
+    injury_map = {}
+    if not injuries.empty:
+        injuries = injuries.rename(columns={
+            'Team ID': 'TeamID',
+            'Player ID': 'PlayerID',
+            'Injury Type': 'InjuryType'
+        })
+        for col in ['MatchID', 'TeamID', 'PlayerID']:
+            if col in injuries.columns:
+                injuries[col] = pd.to_numeric(injuries[col], errors='coerce')
+        injuries = injuries.dropna(subset=['MatchID', 'TeamID', 'PlayerID']).copy()
+        for _, row in injuries.iterrows():
+            match_id = to_int_id(row['MatchID'])
+            team_id = to_int_id(row['TeamID'])
+            player_id = to_int_id(row['PlayerID'])
+            if match_id is None or team_id is None or player_id is None:
+                continue
+            injury_key = (match_id, team_id)
+            injury_map.setdefault(injury_key, set()).add(player_id)
+
+    future_matches = match_meta[match_meta['Played'] != True].copy()
+    for _, match_row in future_matches.iterrows():
+        match_id = to_int_id(match_row['MatchID'])
+        match_date = match_row['MatchDate']
+        for team_col in ['HomeTeamID', 'AwayTeamID']:
+            team_id = to_int_id(match_row[team_col])
+            if match_id is None or team_id is None:
+                continue
+
+            roster = roster_by_team.get(team_id, [])
+            injured_players = injury_map.get((match_id, team_id), set())
+
+            weighted_sum = 0.0
+            weight_total = 0.0
+            for player in roster:
+                player_id = to_int_id(player.get('PlayerID'))
+                if player_id is None or player_id in injured_players:
+                    continue
+                start_prob = max(0.0, min(1.0, float(player.get('StartRate', PLAYER_STARTPROB_FALLBACK))))
+                if start_prob <= 0.0:
+                    continue
+
+                score, prior_apps, pos = latest_profile(team_id, player_id, match_date)
+                if prior_apps < PLAYER_MIN_APPEARANCES or pd.isna(score):
+                    score = fallback_score(team_id, pos)
+                pos_weight_value = float(position_weight.get(pos, 1.0))
+                player_weight = pos_weight_value * start_prob
+                weighted_sum += score * player_weight
+                weight_total += player_weight
+
+            if weight_total > 0:
+                team_score = weighted_sum / weight_total
+            else:
+                team_score = fallback_score(team_id, 'MID')
+
+            absence_penalty = 0.0
+            if injured_players:
+                for injured_player_id in injured_players:
+                    score, prior_apps, pos = latest_profile(team_id, injured_player_id, match_date)
+                    if prior_apps < PLAYER_MIN_APPEARANCES or pd.isna(score):
+                        continue
+                    replacement = fallback_score(team_id, pos)
+                    gap = max(0.0, score - replacement)
+                    start_prob = max(
+                        0.1,
+                        min(1.0, float(start_rate_map.get((team_id, injured_player_id), PLAYER_STARTPROB_FALLBACK)))
+                    )
+                    absence_penalty += gap * float(position_weight.get(pos, 1.0)) * start_prob
+                absence_penalty = absence_penalty / float(max(len(injured_players), 1))
+
+            team_feature_rows.append({
+                'MatchID': match_id,
+                'TeamID': team_id,
+                'PlayerTeamScore': float(team_score),
+                'AbsencePenalty': float(absence_penalty)
+            })
+
+    team_feature_lookup = {
+        (int(r['MatchID']), int(r['TeamID'])): (float(r['PlayerTeamScore']), float(r['AbsencePenalty']))
+        for r in team_feature_rows
+        if r.get('MatchID') is not None and r.get('TeamID') is not None
+    }
+
+    home_scores = []
+    away_scores = []
+    home_absence = []
+    away_absence = []
+    for _, row in match_meta.iterrows():
+        match_id = to_int_id(row['MatchID'])
+        home_team_id = to_int_id(row['HomeTeamID'])
+        away_team_id = to_int_id(row['AwayTeamID'])
+
+        if match_id is not None and home_team_id is not None and (match_id, home_team_id) in team_feature_lookup:
+            h_score, h_penalty = team_feature_lookup[(match_id, home_team_id)]
+        else:
+            h_score = fallback_score(home_team_id, 'MID')
+            h_penalty = 0.0
+
+        if match_id is not None and away_team_id is not None and (match_id, away_team_id) in team_feature_lookup:
+            a_score, a_penalty = team_feature_lookup[(match_id, away_team_id)]
+        else:
+            a_score = fallback_score(away_team_id, 'MID')
+            a_penalty = 0.0
+
+        home_scores.append(float(h_score))
+        away_scores.append(float(a_score))
+        home_absence.append(float(h_penalty))
+        away_absence.append(float(a_penalty))
+
+    out = match_meta[['MatchID']].copy()
+    out['Home_PlayerBaseScore'] = home_scores
+    out['Away_PlayerBaseScore'] = away_scores
+    out['Home_PlayerAbsencePenalty'] = home_absence
+    out['Away_PlayerAbsencePenalty'] = away_absence
+    out['Player_BaseDiff'] = out['Home_PlayerBaseScore'] - out['Away_PlayerBaseScore']
+    out['Player_AbsencePenaltyDiff'] = out['Away_PlayerAbsencePenalty'] - out['Home_PlayerAbsencePenalty']
+    return out[result_cols]
+
+
 home_rows = played_df[['MatchID', 'MatchDate', 'HomeTeamID', 'HomeGoals', 'AwayGoals']].copy()
 home_rows = home_rows.rename(columns={
     'HomeTeamID': 'TeamID',
@@ -386,6 +865,17 @@ df = df.merge(away_asof, on='MatchID', how='left')
 h2h_feats = add_h2h_features(df)
 df = df.merge(h2h_feats, on='MatchID', how='left')
 
+player_base_feats = build_player_base_features(df)
+df = df.merge(player_base_feats, on='MatchID', how='left')
+for player_col in [
+    'Home_PlayerBaseScore', 'Away_PlayerBaseScore',
+    'Home_PlayerAbsencePenalty', 'Away_PlayerAbsencePenalty',
+    'Player_BaseDiff', 'Player_AbsencePenaltyDiff'
+]:
+    if player_col not in df.columns:
+        df[player_col] = 0.0
+    df[player_col] = pd.to_numeric(df[player_col], errors='coerce').fillna(0.0)
+
 # 4. Feature groups
 train_df   = df[df['Played'] == True].copy()
 predict_df = df[df['Played'] == False].copy()
@@ -410,7 +900,8 @@ team_form_features = [
 
 h2h_base_features = H2H_COMBINED_FEATURES + H2H_VENUE_FEATURES
 h2h_count_features = ['H2H_Combined_MatchCount', 'H2H_Venue_MatchCount']
-outcome_prematch_features = team_form_features + h2h_base_features + h2h_count_features
+player_base_input_features = ['Player_BaseDiff', 'Player_AbsencePenaltyDiff']
+outcome_prematch_features = team_form_features + h2h_base_features + h2h_count_features + player_base_input_features
 
 match_stats_features = [
     'HomeXG', 'AwayXG',
@@ -483,6 +974,10 @@ H2H_SIGNAL_SPECS = [
 WEATHER_CONTEXT_SPECS = [
     {'weight_name': f'WeatherContext_{feat}', 'column': feat}
     for feat in weather_features
+]
+PLAYER_BASE_SIGNAL_SPECS = [
+    {'weight_name': 'Player_FormDiff', 'column': 'Player_BaseDiff'},
+    {'weight_name': 'Player_AbsencePenaltyDiff', 'column': 'Player_AbsencePenaltyDiff'}
 ]
 BASE_MULTIPLIER_PARAMETER_NAMES = [
     'BaseMultiplier_General',
@@ -1065,6 +1560,7 @@ def collect_weight_parameter_names(match_stats_mode):
         for subgroup in GENERAL_SIGNAL_GROUP_SPECS.values():
             params.extend(spec['weight_name'] for spec in subgroup)
     params.extend(spec['weight_name'] for spec in H2H_SIGNAL_SPECS)
+    params.extend(spec['weight_name'] for spec in PLAYER_BASE_SIGNAL_SPECS)
     params.extend(spec['weight_name'] for spec in WEATHER_CONTEXT_SPECS)
     params.extend(BASE_MULTIPLIER_PARAMETER_NAMES)
     return params
@@ -1132,7 +1628,7 @@ def build_outcome_design_matrix(signal_df, weight_map, match_stats_mode):
     player_multiplier = resolve_weight_value(weight_map, 'BaseMultiplier_Player', 1.0)
 
     h2h_signal = weighted_signal_from_specs(signal_df, H2H_SIGNAL_SPECS, weight_map)
-    player_signal = pd.Series(0.0, index=signal_df.index, dtype='float64')
+    player_signal = weighted_signal_from_specs(signal_df, PLAYER_BASE_SIGNAL_SPECS, weight_map)
 
     design['General_BaseSignal'] = general_signal * general_multiplier
     design['H2H_BaseSignal'] = h2h_signal * h2h_multiplier
@@ -1272,9 +1768,9 @@ def rank_component(series, smaller_is_better=False):
     if not valid.any():
         return ranked
     if smaller_is_better:
-        ranked.loc[valid] = values.loc[valid].rank(ascending=False, pct=True)
-    else:
         ranked.loc[valid] = values.loc[valid].rank(ascending=True, pct=True)
+    else:
+        ranked.loc[valid] = values.loc[valid].rank(ascending=False, pct=True)
     return ranked
 
 def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
@@ -1373,6 +1869,255 @@ def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
     decision['RecommendationLabel'] = decision.apply(recommendation_label, axis=1)
     return decision
 
+
+def drop_empty_weight_columns(df):
+    if df is None or df.empty:
+        return df
+    cleaned = df.copy()
+    weight_cols = [c for c in cleaned.columns if c.startswith('Weight_')]
+    for col in weight_cols:
+        if cleaned[col].notna().sum() == 0:
+            cleaned = cleaned.drop(columns=[col])
+
+    hybrid_prefixes = (
+        'Weight_General_',
+        'Weight_H2H_H2H_',
+        'Weight_Player_',
+        'Weight_WeatherContext_',
+        'Weight_BaseMultiplier_'
+    )
+    remaining_weight_cols = [c for c in cleaned.columns if c.startswith('Weight_')]
+    has_hybrid_weights = any(col.startswith(hybrid_prefixes) for col in remaining_weight_cols)
+    if has_hybrid_weights:
+        legacy_cols = [col for col in remaining_weight_cols if not col.startswith(hybrid_prefixes)]
+        if legacy_cols:
+            cleaned = cleaned.drop(columns=legacy_cols)
+    return cleaned
+
+
+def persist_decision_table(decision_df, output_path):
+    if decision_df is None:
+        decision_df = pd.DataFrame()
+
+    if decision_df.empty:
+        existing = read_optional_csv(output_path)
+        if not existing.empty:
+            print(f"Decision set empty for current run; keeping existing file: {output_path}")
+            return existing
+        decision_df.to_csv(output_path, index=False)
+        return decision_df
+
+    cleaned = drop_empty_weight_columns(decision_df)
+    cleaned.to_csv(output_path, index=False)
+    return cleaned
+
+
+
+def _safe_float(value, default_value=float('nan')):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return float(default_value)
+    if not math.isfinite(num):
+        return float(default_value)
+    return num
+
+
+def _mean_valid(values, default_value=1.0):
+    valid = [float(v) for v in values if pd.notna(v)]
+    if not valid:
+        return float(default_value)
+    return float(sum(valid) / len(valid))
+
+
+def _legacy_weight(row, suffix, default_value=float('nan')):
+    return _safe_float(row.get(f'Weight_{suffix}'), default_value)
+
+
+def _history_row_key(row, key_cols):
+    key = []
+    for col in key_cols:
+        value = row.get(col, float('nan'))
+        if pd.isna(value):
+            key.append('__nan__')
+        else:
+            key.append(str(value))
+    return tuple(key)
+
+
+def migrate_legacy_history_to_hybrid(history_df, target_schema_version):
+    if history_df is None or history_df.empty:
+        return history_df, 0
+
+    hist = history_df.copy()
+    if 'FeatureSchemaVersion' not in hist.columns:
+        hist['FeatureSchemaVersion'] = 'legacy_v1'
+    if 'SourcePredictionMode' not in hist.columns:
+        if 'PredictionMode' in hist.columns:
+            hist['SourcePredictionMode'] = hist['PredictionMode']
+        else:
+            hist['SourcePredictionMode'] = 'reference'
+
+    key_cols = [c for c in ['PredictionSource', 'MatchStatsMode', 'SourcePredictionMode', 'BatchID', 'RunID'] if c in hist.columns]
+    if not key_cols:
+        return hist, 0
+
+    existing_target = hist[hist['FeatureSchemaVersion'] == target_schema_version]
+    existing_keys = {
+        _history_row_key(row, key_cols)
+        for _, row in existing_target.iterrows()
+    }
+
+    legacy_mask = hist['FeatureSchemaVersion'].isin(['legacy_v1', 'legacy'])
+    legacy_rows = hist[legacy_mask].copy()
+    if legacy_rows.empty:
+        return hist, 0
+
+    legacy_probe_suffixes = [
+        'HomeShots', 'AwayShots',
+        'HomeShotsOnTarget', 'AwayShotsOnTarget',
+        'H2H_Combined_AvgGoalDiff',
+        'Weather_Temperature_C'
+    ]
+
+    migrated_rows = []
+    h2h_suffixes = [
+        'H2H_Combined_AvgGoalDiff', 'H2H_Combined_AvgGoalsFor', 'H2H_Combined_AvgGoalsAgainst',
+        'H2H_Combined_AvgPoints', 'H2H_Combined_WinRate',
+        'H2H_Venue_AvgGoalDiff', 'H2H_Venue_AvgGoalsFor', 'H2H_Venue_AvgGoalsAgainst',
+        'H2H_Venue_AvgPoints', 'H2H_Venue_WinRate'
+    ]
+    weather_suffixes = [
+        'Weather_Temperature_C', 'Weather_Pressure', 'Weather_Humidity',
+        'Weather_WindSpeed', 'Weather_WindDirection', 'Weather_Rain', 'Weather_Snow'
+    ]
+
+    for _, row in legacy_rows.iterrows():
+        row_key = _history_row_key(row, key_cols)
+        if row_key in existing_keys:
+            continue
+
+        probe_values = [_legacy_weight(row, suffix) for suffix in legacy_probe_suffixes]
+        if all(pd.isna(v) for v in probe_values):
+            continue
+
+        migrated = row.copy()
+        migrated['FeatureSchemaVersion'] = target_schema_version
+
+        legacy_weight_cols = [
+            c for c in migrated.index
+            if c.startswith('Weight_Home_')
+            or c.startswith('Weight_Away_')
+            or c.startswith('Weight_Weather_')
+            or c.startswith('Weight_H2H_Combined_')
+            or c.startswith('Weight_H2H_Venue_')
+        ]
+        for legacy_col in legacy_weight_cols:
+            migrated[legacy_col] = float('nan')
+
+        shots_on_target_weight = _mean_valid([
+            _legacy_weight(row, 'HomeShotsOnTarget'),
+            _legacy_weight(row, 'AwayShotsOnTarget')
+        ], default_value=1.0)
+        shots_weight = _mean_valid([
+            _legacy_weight(row, 'HomeShots'),
+            _legacy_weight(row, 'AwayShots')
+        ], default_value=1.0)
+        xg_weight = _mean_valid([
+            _legacy_weight(row, 'HomeXG'),
+            _legacy_weight(row, 'AwayXG'),
+            shots_on_target_weight,
+            shots_weight
+        ], default_value=1.0)
+
+        migrated['Weight_General_GoalCreation_XG'] = xg_weight
+        migrated['Weight_General_GoalCreation_ShotsOnTarget'] = shots_on_target_weight
+        migrated['Weight_General_GoalCreation_Shots'] = shots_weight
+
+        migrated['Weight_General_GameControl_Possession'] = _mean_valid([
+            _legacy_weight(row, 'HomePossession'),
+            _legacy_weight(row, 'AwayPossession')
+        ], default_value=1.0)
+        migrated['Weight_General_GameControl_Passes'] = _mean_valid([
+            _legacy_weight(row, 'HomePasses'),
+            _legacy_weight(row, 'AwayPasses')
+        ], default_value=1.0)
+        migrated['Weight_General_GameControl_PassAccuracy'] = _mean_valid([
+            _legacy_weight(row, 'HomePassAccuracy'),
+            _legacy_weight(row, 'AwayPassAccuracy')
+        ], default_value=1.0)
+
+        migrated['Weight_General_DisciplineSetPiece_Fouls'] = _mean_valid([
+            _legacy_weight(row, 'HomeFouls'),
+            _legacy_weight(row, 'AwayFouls')
+        ], default_value=1.0)
+        migrated['Weight_General_DisciplineSetPiece_YellowCard'] = _mean_valid([
+            _legacy_weight(row, 'HomeYellowCard'),
+            _legacy_weight(row, 'AwayYellowCard')
+        ], default_value=1.0)
+        migrated['Weight_General_DisciplineSetPiece_RedCard'] = _mean_valid([
+            _legacy_weight(row, 'HomeRedCard'),
+            _legacy_weight(row, 'AwayRedCard')
+        ], default_value=1.0)
+        migrated['Weight_General_DisciplineSetPiece_Corners'] = _mean_valid([
+            _legacy_weight(row, 'HomeCorners'),
+            _legacy_weight(row, 'AwayCorners')
+        ], default_value=1.0)
+        migrated['Weight_General_DisciplineSetPiece_Offsides'] = _mean_valid([
+            _legacy_weight(row, 'HomeOffsides'),
+            _legacy_weight(row, 'AwayOffsides')
+        ], default_value=1.0)
+
+        for suffix in h2h_suffixes:
+            migrated[f'Weight_H2H_{suffix}'] = _legacy_weight(row, suffix, default_value=1.0)
+
+        for suffix in weather_suffixes:
+            migrated[f'Weight_WeatherContext_{suffix}'] = _legacy_weight(row, suffix, default_value=1.0)
+
+        migrated['Weight_Player_FormDiff'] = 1.0
+        migrated['Weight_Player_AbsencePenaltyDiff'] = 1.0
+        migrated['Weight_BaseMultiplier_General'] = 1.0
+        migrated['Weight_BaseMultiplier_H2H'] = 1.0
+        migrated['Weight_BaseMultiplier_Player'] = 1.0
+        migrated['IsMigratedFromLegacy'] = True
+
+        migrated_rows.append(migrated)
+        existing_keys.add(row_key)
+
+    if not migrated_rows:
+        return hist, 0
+
+    migrated_df = pd.DataFrame(migrated_rows)
+    updated = pd.concat([hist, migrated_df], ignore_index=True, sort=False)
+    dedupe_cols = [c for c in ['PredictionSource', 'MatchStatsMode', 'FeatureSchemaVersion', 'BatchID', 'RunID'] if c in updated.columns]
+    if dedupe_cols:
+        updated = updated.drop_duplicates(subset=dedupe_cols, keep='last')
+    return updated, len(migrated_rows)
+
+
+def ensure_migrated_history_schema(history_path, target_schema_version):
+    existing = read_optional_csv(history_path)
+    if existing.empty:
+        return 0
+
+    if 'MatchStatsMode' not in existing.columns:
+        existing['MatchStatsMode'] = 'actual'
+    if 'PredictionSource' not in existing.columns:
+        existing['PredictionSource'] = 'simulation'
+    if 'SourcePredictionMode' not in existing.columns:
+        if 'PredictionMode' in existing.columns:
+            existing['SourcePredictionMode'] = existing['PredictionMode']
+        else:
+            existing['SourcePredictionMode'] = 'reference'
+    if 'FeatureSchemaVersion' not in existing.columns:
+        existing['FeatureSchemaVersion'] = 'legacy_v1'
+
+    migrated_history, migrated_count = migrate_legacy_history_to_hybrid(existing, target_schema_version)
+    if migrated_count > 0:
+        migrated_history.to_csv(history_path, index=False)
+    return migrated_count
+
+
 def load_run_history(path, weight_cols, match_stats_mode, source_prediction_mode=None, feature_schema_version=None):
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -1398,14 +2143,22 @@ def load_run_history(path, weight_cols, match_stats_mode, source_prediction_mode
     if hist.empty:
         return hist
 
-    for col in weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K']:
+    for col in weight_cols:
+        if col not in hist.columns:
+            hist[col] = 1.0
+    for col in ['AvgNLL', 'Accuracy', 'H2H_K']:
         if col not in hist.columns:
             hist[col] = float('nan')
-    if 'H2H_K' in hist.columns:
-        hist['H2H_K'] = hist['H2H_K'].fillna(H2H_K_DEFAULT)
+
     for col in weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K']:
         hist[col] = pd.to_numeric(hist[col], errors='coerce')
-    hist = hist.dropna(subset=weight_cols + ['AvgNLL', 'Accuracy', 'H2H_K'])
+
+    if weight_cols:
+        hist[weight_cols] = hist[weight_cols].fillna(1.0)
+    if 'H2H_K' in hist.columns:
+        hist['H2H_K'] = hist['H2H_K'].fillna(H2H_K_DEFAULT)
+
+    hist = hist.dropna(subset=['AvgNLL', 'Accuracy', 'H2H_K'])
     return hist
 
 def train_surrogate_model(history_df, feature_cols, target_col):
@@ -1460,6 +2213,11 @@ print(f"Match stats mode: {MATCH_STATS_MODE}")
 print(f"Output path: {OUTPUT_PATH}")
 print(f"Surrogate history source: {RUN_HISTORY_SOURCE_PATH}")
 
+for history_path in {RUN_HISTORY_SOURCE_PATH, RUN_HISTORY_PATH}:
+    migrated_count = ensure_migrated_history_schema(history_path, FEATURE_SCHEMA_VERSION)
+    if migrated_count > 0:
+        print(f"Migrated {migrated_count} legacy run-history rows to {FEATURE_SCHEMA_VERSION}: {history_path}")
+
 if PREDICTION_MODE == 'reference':
     backfill_pred_df, backfill_summary_df = try_backfill_reference_from_future(ref_results)
     if not backfill_pred_df.empty:
@@ -1511,7 +2269,7 @@ if PREDICTION_MODE == 'reference':
             current_mode_history = current_mode_history[current_mode_history['FeatureSchemaVersion'] == FEATURE_SCHEMA_VERSION].copy()
 
         decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
-        decision_df.to_csv(PARETO_OUT_PATH, index=False)
+        decision_df = persist_decision_table(decision_df, PARETO_OUT_PATH)
         print(decision_df.head(5))
         raise SystemExit(0)
 
@@ -1915,7 +2673,7 @@ else:
             decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
         else:
             decision_df = build_future_candidate_ranking(summary_df, PARETO_TARGET_SIZE)
-        decision_df.to_csv(PARETO_OUT_PATH, index=False)
+        decision_df = persist_decision_table(decision_df, PARETO_OUT_PATH)
         print(decision_df.head(5))
 
         if PREDICTION_MODE == 'future' and not decision_df.empty:
@@ -1951,8 +2709,6 @@ else:
             print(outcome_table.head(10))
     else:
         pd.DataFrame().to_csv(RUN_SUMMARY_OUT_PATH, index=False)
-        if PREDICTION_MODE == 'reference':
-            pd.DataFrame().to_csv(PARETO_OUT_PATH, index=False)
-        else:
-            pd.DataFrame().to_csv(PARETO_OUT_PATH, index=False)
+        persist_decision_table(pd.DataFrame(), PARETO_OUT_PATH)
+        if PREDICTION_MODE != 'reference':
             pd.DataFrame().to_csv(FUTURE_OUTCOME_TABLE_PATH, index=False)

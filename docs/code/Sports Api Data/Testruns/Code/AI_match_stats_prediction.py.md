@@ -1,4 +1,4 @@
-﻿# `AI_match_stats_prediction.py`
+# `AI_match_stats_prediction.py`
 
 Source: `Sports Api Data/Testruns/Code/AI_match_stats_prediction.py`
 
@@ -15,7 +15,7 @@ ein flacher Feature-Vektor gewichtet wird, sondern 3 Basissignale (General/H2H/P
 
 - `General_BaseSignal`: (Home - Away) aus Match-Stats-Subgruppen (inkl. xG), mit festen Subgruppen-Gewichten.
 - `H2H_BaseSignal`: gewichtetes Signal aus H2H-Features (diese sind bereits relativ).
-- `Player_BaseSignal`: aktuell Platzhalter (0.0), als Anschlussstelle fuer die Player-Pipeline.
+- `Player_BaseSignal`: gewichtetes Home-minus-Away Signal aus `Player_BaseDiff` und `Player_AbsencePenaltyDiff`.
 - Wetter bleibt als Kontext (`Weather_*`) und wird direkt als gewichtete Input-Spalte in die Design-Matrix genommen.
 
 ## Ziele / Responsibilities
@@ -125,7 +125,7 @@ Aus dem (imputierten) Input-DataFrame wird eine Design-Matrix gebaut:
 
 - `General_BaseSignal`
 - `H2H_BaseSignal`
-- `Player_BaseSignal` (aktuell 0.0)
+- `Player_BaseSignal` (aus Player-Form und Absenz-Penalty)
 - plus Wetter-Kontextspalten `Weather_*`
 
 Signaldefinition:
@@ -135,6 +135,9 @@ Signaldefinition:
   - `GameControl` (Possession, Passes, PassAccuracy)
   - `DisciplineSetPiece` (Fouls, Karten, Corners, Offsides; teils invertiert, weil mehr Fouls/Karten meist negativ sind)
 - H2H-Signal: gewichtete Kombination der vorhandenen relativen H2H-Features.
+- Player-Signal: gewichtete Kombination aus:
+  - `Player_BaseDiff` (Home-PlayerScore minus Away-PlayerScore)
+  - `Player_AbsencePenaltyDiff` (Away-Absenzpenalty minus Home-Absenzpenalty)
 - Wetter: bleibt absolut (keine Home/Away Differenz).
 
 ### 6) Gewichtsschema (Hybrid)
@@ -198,7 +201,7 @@ Wie:
 - xG ist oft teilweise leer: das ist ok, solange Imputation aktiv ist.
 - `future` + `MATCH_STATS_MODE='actual'` ist nicht erlaubt (keine echten Match-Stats vor Anpfiff).
 - Wenn `match_results_references.csv` MatchIDs enthaelt, die nicht in `df` vorkommen: `build_prediction_frame` wirft einen Fehler.
-- `Player_BaseSignal` ist aktuell 0.0: das ist bewusst ein Platzhalter fuer die kommende Player-Pipeline.
+- Player-Features haengen von `lineups_league_78.csv`, `injuries_league_78.csv` und `player_statistics_per_fixture_league_78.csv` ab.
 
 ## Ausfuehren (Beispiel)
 
@@ -211,3 +214,6 @@ Empfohlener Check nach einem Lauf:
 1. `Sports Api Data/Testruns/Datacollection reference/prediction_weight_run_summary.csv` (Reference-Run-Metriken).
 2. `Sports Api Data/Testruns/Datacollection reference/pareto_front.csv` (Decision-Set).
 3. `Sports Api Data/Testruns/Datacollection reference/surrogate_run_history.csv` (Historie inkl. `FeatureSchemaVersion`).
+
+
+

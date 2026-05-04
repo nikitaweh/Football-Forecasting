@@ -1,5 +1,6 @@
 ﻿import json
 import os
+import tempfile
 import time
 from datetime import datetime
 
@@ -60,6 +61,17 @@ def _api_get_json(session, endpoint, params=None):
     response = session.get(url, params=params, timeout=(REQUEST_CONNECT_TIMEOUT, REQUEST_READ_TIMEOUT))
     response.raise_for_status()
     return response.json()
+
+
+def _atomic_write_json(file_path, payload):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(file_path), delete=False) as tmp:
+        json.dump(payload, tmp, ensure_ascii=False, indent=4)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = tmp.name
+
+    os.replace(tmp_path, file_path)
 
 
 def collect_player_stats():
@@ -137,9 +149,7 @@ def collect_player_stats():
         print(f"[{datetime.now()}] Keine neuen Daten gefunden.")
 
     output_data = {"response": existing_stats}
-    os.makedirs(os.path.dirname(OUTPUT_FILE_PATH), exist_ok=True)
-    with open(OUTPUT_FILE_PATH, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=4)
+    _atomic_write_json(OUTPUT_FILE_PATH, output_data)
     print(f"[{datetime.now()}] Fertig. Datei gespeichert: '{OUTPUT_FILE_PATH}'")
 
 

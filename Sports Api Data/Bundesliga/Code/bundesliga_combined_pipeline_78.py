@@ -1,20 +1,13 @@
 ﻿import argparse
 import importlib.util
 import re
-import subprocess
-import sys
 import time
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-CITY_STEP_TIMEOUT_SECONDS_DEFAULT = 300
 
 PATHS = {
-    "league_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\League General Info.py",
-    "teams_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\Team General Info.py",
-    "teams_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\teams general info.py",
-    "city_coords_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\City Coordinates.py",
     "fixtures_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\Fixtures Bundesliga.py",
     "stammdaten_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\Stammdaten_78.py",
     "injuries_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\injuries_78.py",
@@ -60,38 +53,8 @@ def _run_step(step_name, fn):
     print(f"[DONE]  {step_name} ({dt:.1f}s)")
 
 
-def _run_city_coordinates_script(timeout_seconds=CITY_STEP_TIMEOUT_SECONDS_DEFAULT, strict=False):
-    script_path = PROJECT_ROOT / PATHS["city_coords_filtered"]
-    cmd = [sys.executable, str(script_path)]
-    if strict:
-        cmd.append("--strict")
-
-    try:
-        subprocess.run(cmd, cwd=str(PROJECT_ROOT), check=True, timeout=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(
-            f"City-Coordinates Schritt hat Timeout nach {timeout_seconds}s erreicht. "
-            "Nutze --without-city oder erhoehe --city-timeout-seconds."
-        ) from exc
-
-
-def run_teams_pipeline(include_city=True, city_timeout_seconds=CITY_STEP_TIMEOUT_SECONDS_DEFAULT, city_strict=False):
-    league = _load_module("league_unfiltered")
-    teams = _load_module("teams_unfiltered")
-    teams_csv = _load_module("teams_filtered")
-
-    _run_step("API Pull: League General Info", league.fetch_bundesliga)
-    _run_step("API Pull: Team General Info", teams.fetch_all_teams)
-    _run_step("Filter: teams general info -> CSV", teams_csv.convert_teams_to_csv)
-
-    if include_city:
-        _run_step(
-            "Filter: City Coordinates -> CSV",
-            lambda: _run_city_coordinates_script(
-                timeout_seconds=city_timeout_seconds,
-                strict=city_strict,
-            ),
-        )
+def run_teams_pipeline():
+    print("[SKIP] Schritt 'teams' ist deaktiviert (keine Updates fuer League/Teams/City Coordinates).")
 
 
 def run_fixtures_pipeline(fixtures_mode):
@@ -160,24 +123,8 @@ def main():
         "--steps",
         nargs="+",
         choices=["teams", "fixtures", "injuries", "lineups", "matchstats", "playerstats", "weather"],
-        default=["teams", "fixtures", "injuries", "lineups", "matchstats", "playerstats"],
+        default=["fixtures", "injuries", "lineups", "matchstats", "playerstats"],
         help="Auszufuehrende Pipeline-Bloecke in Reihenfolge.",
-    )
-    parser.add_argument(
-        "--without-city",
-        action="store_true",
-        help="City-Coordinates-Schritt im Team-Block ueberspringen.",
-    )
-    parser.add_argument(
-        "--city-timeout-seconds",
-        type=int,
-        default=CITY_STEP_TIMEOUT_SECONDS_DEFAULT,
-        help="Maximale Laufzeit fuer City-Coordinates-Schritt.",
-    )
-    parser.add_argument(
-        "--city-strict",
-        action="store_true",
-        help="Pipeline bricht ab, wenn City-Coordinates nicht alle Teams aufloesen kann.",
     )
     parser.add_argument(
         "--continue-on-error",
@@ -187,11 +134,7 @@ def main():
     args = parser.parse_args()
 
     runners = {
-        "teams": lambda: run_teams_pipeline(
-            include_city=not args.without_city,
-            city_timeout_seconds=max(1, args.city_timeout_seconds),
-            city_strict=args.city_strict,
-        ),
+        "teams": run_teams_pipeline,
         "fixtures": lambda: run_fixtures_pipeline(fixtures_mode=args.fixtures_mode),
         "injuries": run_injuries_pipeline,
         "lineups": run_lineups_pipeline,
