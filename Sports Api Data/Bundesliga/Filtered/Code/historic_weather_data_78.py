@@ -1,7 +1,6 @@
 ﻿import os
 import time
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -19,10 +18,10 @@ city_coordinates_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Fi
 output_csv_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/historical_weather_data_78.csv"
 
 # ---------------------------
-# OpenWeather API Key und History-Endpoint
+# OpenWeather API Key und Current-Endpoint
 # ---------------------------
 API_KEY = "8738a0031c3e965eaece939dbc7faf1d"
-BASE_URL = "https://history.openweathermap.org/data/2.5/history/city"
+BASE_URL = "https://api.openweathermap.org/data/2.5/weather"
 REQUEST_CONNECT_TIMEOUT = 4
 REQUEST_READ_TIMEOUT = 8
 REQUEST_RETRIES = 2
@@ -70,7 +69,7 @@ def _build_session():
     session = requests.Session()
     session.headers.update(
         {
-            "User-Agent": "bundesliga-historic-weather/1.0",
+            "User-Agent": "bundesliga-current-weather/1.0",
             "Accept": "application/json",
         }
     )
@@ -93,25 +92,8 @@ def get_weather_offsets(match_dt):
 
 
 # ---------------------------
-# Hilfsfunktion: Eine Wetter-Abfrage durchfuehren (History/city)
+# Hilfsfunktion: Eine Wetter-Abfrage durchfuehren (Current weather)
 # ---------------------------
-def _last_sunday(year, month):
-    day = pd.Timestamp(year=year, month=month, day=1) + pd.offsets.MonthEnd(0)
-    while day.weekday() != 6:
-        day -= pd.Timedelta(days=1)
-    return day
-
-
-def _adjust_request_time(dt_local):
-    year = dt_local.year
-    tz = ZoneInfo("Europe/Berlin")
-    start = _last_sunday(year, 3).replace(hour=3, minute=0, second=0, microsecond=0, tzinfo=tz)
-    end = _last_sunday(year, 10).replace(hour=1, minute=59, second=59, microsecond=999, tzinfo=tz)
-    if start <= dt_local <= end:
-        return dt_local - pd.Timedelta(hours=2)
-    return dt_local - pd.Timedelta(hours=1)
-
-
 def _request_weather_with_attempts(session, params):
     last_error = None
     total_attempts = REQUEST_RETRIES + 1
@@ -127,11 +109,11 @@ def _request_weather_with_attempts(session, params):
             return resp.json()
         except requests.exceptions.Timeout as exc:
             last_error = exc
-            print(f"History-Weather Timeout (Versuch {attempt}/{total_attempts}).")
+            print(f"Current-Weather Timeout (Versuch {attempt}/{total_attempts}).")
         except requests.exceptions.RequestException as exc:
             last_error = exc
             status_code = getattr(exc.response, "status_code", None)
-            print(f"History-Weather HTTP/Netzwerkfehler (Versuch {attempt}/{total_attempts}): {exc}")
+            print(f"Current-Weather HTTP/Netzwerkfehler (Versuch {attempt}/{total_attempts}): {exc}")
             if status_code and 400 <= status_code < 500 and status_code != 429:
                 break
 
@@ -140,19 +122,14 @@ def _request_weather_with_attempts(session, params):
 
     if last_error:
         raise last_error
-    raise RuntimeError("History-Weather Request fehlgeschlagen ohne konkrete Exception.")
+    raise RuntimeError("Current-Weather Request fehlgeschlagen ohne konkrete Exception.")
 
 
 def fetch_weather(lat, lon, dt_local, session=None, cache=None):
     if not _has_valid_coordinates(lat, lon):
         return _empty_weather_record()
 
-    if dt_local.tzinfo is None:
-        dt_local = dt_local.replace(tzinfo=ZoneInfo("Europe/Berlin"))
-
-    dt_local = _adjust_request_time(dt_local)
-    ts = int(dt_local.astimezone(ZoneInfo("UTC")).timestamp())
-    cache_key = (round(float(lat), 6), round(float(lon), 6), ts)
+    cache_key = (round(float(lat), 6), round(float(lon), 6))
 
     if cache is not None and cache_key in cache:
         return cache[cache_key]
@@ -160,9 +137,6 @@ def fetch_weather(lat, lon, dt_local, session=None, cache=None):
     params = {
         "lat": lat,
         "lon": lon,
-        "type": "hour",
-        "start": ts,
-        "end": ts + 3600,
         "appid": API_KEY,
         "units": "metric",
     }
@@ -174,22 +148,19 @@ def fetch_weather(lat, lon, dt_local, session=None, cache=None):
     result = _empty_weather_record()
     try:
         payload = _request_weather_with_attempts(session, params)
-        data = payload.get("list", [])
-        if data:
-            rec = data[0]
-            main = rec.get("main", {})
-            wind = rec.get("wind", {})
-            result = {
-                "Temperature (C)": main.get("temp"),
-                "Pressure": main.get("pressure"),
-                "Humidity": main.get("humidity"),
-                "Wind Speed": wind.get("speed"),
-                "Wind Direction": wind.get("deg"),
-                "Rain": rec.get("rain", {}).get("1h", 0),
-                "Snow": rec.get("snow", {}).get("1h", 0),
-            }
+        main = payload.get("main", {})
+        wind = payload.get("wind", {})
+        result = {
+            "Temperature (C)": main.get("temp"),
+            "Pressure": main.get("pressure"),
+            "Humidity": main.get("humidity"),
+            "Wind Speed": wind.get("speed"),
+            "Wind Direction": wind.get("deg"),
+            "Rain": payload.get("rain", {}).get("1h", 0),
+            "Snow": payload.get("snow", {}).get("1h", 0),
+        }
     except Exception as exc:
-        print(f"History-Weather fehlgeschlagen ({lat}, {lon}, {dt_local}): {exc}")
+        print(f"Current-Weather fehlgeschlagen ({lat}, {lon}, {dt_local}): {exc}")
     finally:
         if owns_session:
             session.close()
@@ -198,7 +169,6 @@ def fetch_weather(lat, lon, dt_local, session=None, cache=None):
         cache[cache_key] = result
 
     return result
-
 
 # ---------------------------
 # main(): Erzeugt die Basis-CSV aus lokalen historischen Wetterdaten

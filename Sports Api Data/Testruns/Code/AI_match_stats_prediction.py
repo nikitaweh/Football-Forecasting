@@ -20,14 +20,14 @@ WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
 LINEUPS_PATH = os.path.join(DATA_PATH, 'lineups_league_78.csv')
 INJURIES_PATH = os.path.join(DATA_PATH, 'injuries_league_78.csv')
 PLAYER_STATS_PATH = os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv')
-MAX_RUNS = 20
+MAX_RUNS = 200
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
 
 # === PREDICTION TARGET SWITCH ===
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
-PREDICTION_MODE = 'reference'
+PREDICTION_MODE = 'future'
 REFERENCE_PREDICTION_LIMIT = None
 
 # === MATCH STATS SWITCH ===
@@ -553,53 +553,6 @@ def build_player_base_features(df_src):
         for pos, weight in PLAYER_POSITION_IMPORTANCE.items()
     }
 
-    played_match_ids = set(match_meta.loc[match_meta['Played'] == True, 'MatchID'].tolist())
-    team_feature_rows = []
-
-    if not lineups_match.empty:
-        starter_rows = lineups_match[
-            (lineups_match['StartXI'])
-            & (lineups_match['MatchID'].isin(played_match_ids))
-        ].copy()
-        starter_rows = starter_rows.merge(
-            player_stats[['MatchID', 'TeamID', 'PlayerID', 'PlayerRollingScore', 'PlayerPriorAppearances', 'PositionGroup']],
-            on=['MatchID', 'TeamID', 'PlayerID'],
-            how='left',
-            suffixes=('', '_Stats')
-        )
-        starter_rows['PosFinal'] = starter_rows['PositionGroup'].combine_first(starter_rows.get('PositionGroup_Stats', pd.Series(index=starter_rows.index, dtype='object')))
-        starter_rows['PosFinal'] = starter_rows['PosFinal'].fillna('MID').apply(normalize_position)
-        starter_rows['PosWeight'] = starter_rows['PosFinal'].map(position_weight).fillna(1.0)
-
-        valid_hist = (
-            pd.to_numeric(starter_rows['PlayerPriorAppearances'], errors='coerce').fillna(0) >= PLAYER_MIN_APPEARANCES
-        ) & pd.to_numeric(starter_rows['PlayerRollingScore'], errors='coerce').notna()
-        starter_rows['EffectiveScore'] = pd.to_numeric(starter_rows['PlayerRollingScore'], errors='coerce')
-
-        missing_mask = ~valid_hist
-        if missing_mask.any():
-            starter_rows.loc[missing_mask, 'EffectiveScore'] = starter_rows.loc[missing_mask].apply(
-                lambda r: fallback_score(r['TeamID'], r['PosFinal']),
-                axis=1
-            )
-
-        starter_rows['WeightedScore'] = starter_rows['EffectiveScore'] * starter_rows['PosWeight']
-        agg = starter_rows.groupby(['MatchID', 'TeamID'], as_index=False).agg(
-            WeightedScoreSum=('WeightedScore', 'sum'),
-            WeightSum=('PosWeight', 'sum')
-        )
-        agg['PlayerTeamScore'] = agg['WeightedScoreSum'] / agg['WeightSum'].replace(0, float('nan'))
-        agg['PlayerTeamScore'] = agg['PlayerTeamScore'].fillna(global_fallback)
-        agg['AbsencePenalty'] = 0.0
-
-        for _, r in agg.iterrows():
-            team_feature_rows.append({
-                'MatchID': int(r['MatchID']),
-                'TeamID': int(r['TeamID']),
-                'PlayerTeamScore': float(r['PlayerTeamScore']),
-                'AbsencePenalty': float(r['AbsencePenalty'])
-            })
-
     start_hist = pd.DataFrame(columns=['MatchID', 'TeamID', 'PlayerID', 'PositionGroup', 'StartRate'])
     if not lineups_match.empty:
         start_hist = lineups_match.merge(
@@ -613,6 +566,22 @@ def build_player_base_features(df_src):
     start_rate_map = {}
     if not start_hist.empty:
         start_rate_map = start_hist.groupby(['TeamID', 'PlayerID'])['StarterNumeric'].mean().to_dict()
+
+    start_tables = {}
+    if not start_hist.empty:
+        for (team_id, player_id), grp in start_hist.groupby(['TeamID', 'PlayerID']):
+            start_tables[(int(team_id), int(player_id))] = grp[['MatchDate', 'StarterNumeric']].sort_values('MatchDate')
+
+    def start_rate_at(team_id, player_id, match_date):
+        table = start_tables.get((team_id, player_id))
+        if table is None or table.empty:
+            return PLAYER_STARTPROB_FALLBACK
+        if pd.isna(match_date):
+            return float(table['StarterNumeric'].mean())
+        prior = table[table['MatchDate'] < match_date]
+        if prior.empty:
+            return PLAYER_STARTPROB_FALLBACK
+        return float(prior['StarterNumeric'].mean())
 
     stats_players = player_stats[['TeamID', 'PlayerID', 'PositionGroup']].drop_duplicates(subset=['TeamID', 'PlayerID'])
     roster_rows = []
@@ -673,6 +642,79 @@ def build_player_base_features(df_src):
             injury_key = (match_id, team_id)
             injury_map.setdefault(injury_key, set()).add(player_id)
 
+    def compute_absence_penalty(team_id, injured_players, match_date):
+        if not injured_players:
+            return 0.0
+        total = 0.0
+        counted = 0
+        for injured_player_id in injured_players:
+            score, prior_apps, pos = latest_profile(team_id, injured_player_id, match_date)
+            if prior_apps < PLAYER_MIN_APPEARANCES or pd.isna(score):
+                continue
+            replacement = fallback_score(team_id, pos)
+            gap = max(0.0, score - replacement)
+            start_prob = max(
+                0.1,
+                min(1.0, float(start_rate_at(team_id, injured_player_id, match_date)))
+            )
+            total += gap * float(position_weight.get(pos, 1.0)) * start_prob
+            counted += 1
+        if counted == 0:
+            return 0.0
+        return total / float(counted)
+
+    match_date_lookup = match_meta.set_index('MatchID')['MatchDate'].to_dict()
+
+    played_match_ids = set(match_meta.loc[match_meta['Played'] == True, 'MatchID'].tolist())
+    team_feature_rows = []
+
+    if not lineups_match.empty:
+        starter_rows = lineups_match[
+            (lineups_match['StartXI'])
+            & (lineups_match['MatchID'].isin(played_match_ids))
+        ].copy()
+        starter_rows = starter_rows.merge(
+            player_stats[['MatchID', 'TeamID', 'PlayerID', 'PlayerRollingScore', 'PlayerPriorAppearances', 'PositionGroup']],
+            on=['MatchID', 'TeamID', 'PlayerID'],
+            how='left',
+            suffixes=('', '_Stats')
+        )
+        starter_rows['PosFinal'] = starter_rows['PositionGroup'].combine_first(starter_rows.get('PositionGroup_Stats', pd.Series(index=starter_rows.index, dtype='object')))
+        starter_rows['PosFinal'] = starter_rows['PosFinal'].fillna('MID').apply(normalize_position)
+        starter_rows['PosWeight'] = starter_rows['PosFinal'].map(position_weight).fillna(1.0)
+
+        valid_hist = (
+            pd.to_numeric(starter_rows['PlayerPriorAppearances'], errors='coerce').fillna(0) >= PLAYER_MIN_APPEARANCES
+        ) & pd.to_numeric(starter_rows['PlayerRollingScore'], errors='coerce').notna()
+        starter_rows['EffectiveScore'] = pd.to_numeric(starter_rows['PlayerRollingScore'], errors='coerce')
+
+        missing_mask = ~valid_hist
+        if missing_mask.any():
+            starter_rows.loc[missing_mask, 'EffectiveScore'] = starter_rows.loc[missing_mask].apply(
+                lambda r: fallback_score(r['TeamID'], r['PosFinal']),
+                axis=1
+            )
+
+        starter_rows['WeightedScore'] = starter_rows['EffectiveScore'] * starter_rows['PosWeight']
+        agg = starter_rows.groupby(['MatchID', 'TeamID'], as_index=False).agg(
+            WeightedScoreSum=('WeightedScore', 'sum'),
+            WeightSum=('PosWeight', 'sum')
+        )
+        agg['PlayerTeamScore'] = agg['WeightedScoreSum'] / agg['WeightSum'].replace(0, float('nan'))
+        agg['PlayerTeamScore'] = agg['PlayerTeamScore'].fillna(global_fallback)
+
+        for _, r in agg.iterrows():
+            match_id = int(r['MatchID'])
+            team_id = int(r['TeamID'])
+            match_date = match_date_lookup.get(match_id, pd.NaT)
+            injured = injury_map.get((match_id, team_id), set())
+            team_feature_rows.append({
+                'MatchID': match_id,
+                'TeamID': team_id,
+                'PlayerTeamScore': float(r['PlayerTeamScore']),
+                'AbsencePenalty': float(compute_absence_penalty(team_id, injured, match_date))
+            })
+
     future_matches = match_meta[match_meta['Played'] != True].copy()
     for _, match_row in future_matches.iterrows():
         match_id = to_int_id(match_row['MatchID'])
@@ -708,26 +750,11 @@ def build_player_base_features(df_src):
             else:
                 team_score = fallback_score(team_id, 'MID')
 
-            absence_penalty = 0.0
-            if injured_players:
-                for injured_player_id in injured_players:
-                    score, prior_apps, pos = latest_profile(team_id, injured_player_id, match_date)
-                    if prior_apps < PLAYER_MIN_APPEARANCES or pd.isna(score):
-                        continue
-                    replacement = fallback_score(team_id, pos)
-                    gap = max(0.0, score - replacement)
-                    start_prob = max(
-                        0.1,
-                        min(1.0, float(start_rate_map.get((team_id, injured_player_id), PLAYER_STARTPROB_FALLBACK)))
-                    )
-                    absence_penalty += gap * float(position_weight.get(pos, 1.0)) * start_prob
-                absence_penalty = absence_penalty / float(max(len(injured_players), 1))
-
             team_feature_rows.append({
                 'MatchID': match_id,
                 'TeamID': team_id,
                 'PlayerTeamScore': float(team_score),
-                'AbsencePenalty': float(absence_penalty)
+                'AbsencePenalty': float(compute_absence_penalty(team_id, injured_players, match_date))
             })
 
     team_feature_lookup = {

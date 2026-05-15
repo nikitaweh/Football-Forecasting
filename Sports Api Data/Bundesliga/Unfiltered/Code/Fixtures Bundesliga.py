@@ -96,9 +96,24 @@ def save_all(fixtures):
     print(f"Gespeichert: {len(fixtures)} Spiele.")
 
 
+def _current_season():
+    # api-football encodes a Bundesliga season by its start year (Aug-May).
+    now = datetime.now(timezone.utc)
+    return now.year if now.month >= 7 else now.year - 1
+
+
+def _seasons_to_refresh():
+    season = _current_season()
+    month = datetime.now(timezone.utc).month
+    # During the summer transition both seasons may have published fixtures.
+    if month in (6, 7, 8):
+        return [season, season + 1]
+    return [season]
+
+
 def fetch_full_fixtures():
-    current_year = datetime.now(timezone.utc).year
-    seasons = list(range(START_SEASON, current_year + 1))
+    current_season = _current_season()
+    seasons = list(range(START_SEASON, current_season + 1))
     all_fixtures = []
     seen_ids = set()
 
@@ -122,29 +137,37 @@ def fetch_new_fixtures():
     except (FileNotFoundError, json.JSONDecodeError):
         existing = []
 
-    seen_ids = {
-        fixture.get("fixture", {}).get("id")
-        for fixture in existing
-        if fixture.get("fixture", {}).get("id")
-    }
-    new_fixtures = []
-
-    current_season = datetime.now(timezone.utc).year
-    with _build_session() as session:
-        fixtures = fetch_fixtures_by_season(session, current_season)
-
-    for fixture in fixtures:
+    by_id = {}
+    order = []
+    for fixture in existing:
         fid = fixture.get("fixture", {}).get("id")
-        if fid and fid not in seen_ids:
-            seen_ids.add(fid)
-            new_fixtures.append(fixture)
+        if fid is None:
+            continue
+        if fid not in by_id:
+            order.append(fid)
+        by_id[fid] = fixture
 
-    if new_fixtures:
-        combined = existing + new_fixtures
-        save_all(combined)
-        print(f"{len(new_fixtures)} neue Spiele hinzugefuegt.")
-    else:
-        print("Keine neuen Spiele.")
+    added = 0
+    updated = 0
+    with _build_session() as session:
+        for season in _seasons_to_refresh():
+            fixtures = fetch_fixtures_by_season(session, season)
+            for fixture in fixtures:
+                fid = fixture.get("fixture", {}).get("id")
+                if fid is None:
+                    continue
+                if fid in by_id:
+                    if by_id[fid] != fixture:
+                        by_id[fid] = fixture
+                        updated += 1
+                else:
+                    by_id[fid] = fixture
+                    order.append(fid)
+                    added += 1
+
+    combined = [by_id[fid] for fid in order]
+    save_all(combined)
+    print(f"{added} neue Spiele, {updated} aktualisiert.")
 
 
 if __name__ == "__main__":
