@@ -3,7 +3,7 @@ import argparse
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -30,6 +30,21 @@ REQUEST_CONNECT_TIMEOUT = 4
 REQUEST_READ_TIMEOUT = 12
 REQUEST_RETRIES = 2
 REQUEST_BACKOFF_SECONDS = 1.0
+
+
+def _current_season():
+    # api-football encodes a Bundesliga season by its start year (Aug-May).
+    now = datetime.now(timezone.utc)
+    return now.year if now.month >= 7 else now.year - 1
+
+
+def _seasons_to_refresh():
+    season = _current_season()
+    month = datetime.now(timezone.utc).month
+    # During the summer transition both seasons may have published fixtures.
+    if month in (6, 7, 8):
+        return {season, season + 1}
+    return {season}
 
 
 def _build_session():
@@ -65,12 +80,19 @@ def fetch_injuries(full_load=False):
         print(f"[{now}] Fehler beim Laden der Fixture-Datei: {exc}")
         return
 
+    seasons = _seasons_to_refresh()
     fixture_ids = []
     for item in data.get("response", []):
+        season = item.get("league", {}).get("season")
+        if season not in seasons:
+            continue
         fid = item.get("fixture", {}).get("id") or item.get("fixture_id")
         if fid is not None:
             fixture_ids.append(fid)
-    print(f"[{now}] Gefundene Fixture-IDs insgesamt: {len(fixture_ids)}")
+    print(
+        f"[{now}] Aktuelle Saison(s): {sorted(seasons)} - "
+        f"Gefundene Fixture-IDs: {len(fixture_ids)}"
+    )
 
     if os.path.exists(OUTPUT_FILE):
         try:

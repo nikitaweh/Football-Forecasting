@@ -2,7 +2,7 @@
 import os
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 import schedule
@@ -36,6 +36,21 @@ def remove_keys(obj, keys_to_remove):
             remove_keys(item, keys_to_remove)
 
 
+def _current_season():
+    # api-football encodes a Bundesliga season by its start year (Aug-May).
+    now = datetime.now(timezone.utc)
+    return now.year if now.month >= 7 else now.year - 1
+
+
+def _seasons_to_refresh():
+    season = _current_season()
+    month = datetime.now(timezone.utc).month
+    # During the summer transition both seasons may have published fixtures.
+    if month in (6, 7, 8):
+        return {season, season + 1}
+    return {season}
+
+
 def _build_session():
     retry = Retry(
         total=REQUEST_RETRIES,
@@ -64,14 +79,41 @@ def _api_get_json(session, endpoint, params=None):
 
 
 def _atomic_write_json(file_path, payload):
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(file_path), delete=False) as tmp:
+    target_dir = os.path.dirname(file_path)
+    target_name = os.path.basename(file_path)
+    os.makedirs(target_dir, exist_ok=True)
+
+    # Recognisable prefix/suffix so any stray temp file is obviously ours.
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=target_dir,
+        prefix=f".{target_name}.tmp_",
+        suffix=".part",
+        delete=False,
+    ) as tmp:
         json.dump(payload, tmp, ensure_ascii=False, indent=4)
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp_path = tmp.name
 
-    os.replace(tmp_path, file_path)
+    # On Windows, os.replace can transiently fail with PermissionError when
+    # the target is held open by another process (OneDrive, antivirus, IDE
+    # indexer, a previous run). Retry a few times before giving up.
+    last_exc = None
+    for attempt in range(6):
+        try:
+            os.replace(tmp_path, file_path)
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(0.5 * (2 ** attempt))  # 0.5, 1, 2, 4, 8, 16s
+    # Replace failed permanently — clean up the temp file so it doesn't linger.
+    try:
+        os.remove(tmp_path)
+    except OSError:
+        pass
+    raise last_exc
 
 
 def collect_player_stats():
@@ -85,13 +127,20 @@ def collect_player_stats():
         print(f"[{datetime.now()}] FEHLER: Fixture-Datei '{INPUT_FILE_PATH}' nicht gefunden.")
         return
 
+    seasons_to_refresh = _seasons_to_refresh()
     fixture_ids = []
+    refresh_ids = set()
     for fixture in fixtures_data.get("response", []):
-        fixture_info = fixture.get("fixture", {})
-        fid = fixture_info.get("id")
-        if fid is not None:
-            fixture_ids.append(fid)
-    print(f"[{datetime.now()}] Es wurden {len(fixture_ids)} Fixture-IDs gefunden.")
+        fid = fixture.get("fixture", {}).get("id")
+        if fid is None:
+            continue
+        fixture_ids.append(fid)
+        if fixture.get("league", {}).get("season") in seasons_to_refresh:
+            refresh_ids.add(fid)
+    print(
+        f"[{datetime.now()}] {len(fixture_ids)} Fixture-IDs gefunden, "
+        f"davon {len(refresh_ids)} aus Saison(s) {sorted(seasons_to_refresh)} (werden refreshed)."
+    )
 
     try:
         with open(OUTPUT_FILE_PATH, "r", encoding="utf-8") as f:
@@ -116,39 +165,46 @@ def collect_player_stats():
                 "Backup konnte nicht erstellt werden, es wird mit leerer Liste fortgesetzt."
             )
 
-    existing_fixture_ids = {
-        stats.get("fixture_id")
-        for stats in existing_stats
-        if stats.get("fixture_id") is not None
+    # Index by fixture_id so current-season entries can be overwritten in place.
+    stats_by_fid = {
+        entry.get("fixture_id"): entry
+        for entry in existing_stats
+        if entry.get("fixture_id") is not None
     }
 
-    new_stats = []
     total_ids = len(fixture_ids)
+    fetched_new = 0
+    refreshed = 0
+    failed = 0
     with _build_session() as session:
         for idx, fid in enumerate(fixture_ids, start=1):
-            if fid in existing_fixture_ids:
-                print(f"[{idx}/{total_ids}] Fixture-ID {fid} bereits erfasst, ueberspringe.")
+            is_refresh = fid in refresh_ids
+            already_have = fid in stats_by_fid
+            if already_have and not is_refresh:
                 continue
 
             try:
                 stats_json = _api_get_json(session, "/fixtures/players", params={"fixture": fid})
             except Exception as exc:
                 print(f"[{idx}/{total_ids}] Fehler fuer Fixture-ID {fid}: {exc}")
+                failed += 1
                 continue
 
             remove_keys(stats_json, {"logo", "photo"})
             stats_json["fixture_id"] = fid
-            new_stats.append(stats_json)
-            print(f"[{idx}/{total_ids}] Daten fuer Fixture-ID {fid} abgerufen.")
+            stats_by_fid[fid] = stats_json
+            if already_have:
+                refreshed += 1
+            else:
+                fetched_new += 1
             time.sleep(0.12)
 
-    if new_stats:
-        existing_stats.extend(new_stats)
-        print(f"[{datetime.now()}] {len(new_stats)} neue Eintraege hinzugefuegt.")
-    else:
-        print(f"[{datetime.now()}] Keine neuen Daten gefunden.")
+    print(
+        f"[{datetime.now()}] Neu hinzugefuegt: {fetched_new}, aktualisiert: {refreshed}, "
+        f"fehlgeschlagen: {failed}."
+    )
 
-    output_data = {"response": existing_stats}
+    output_data = {"response": list(stats_by_fid.values())}
     _atomic_write_json(OUTPUT_FILE_PATH, output_data)
     print(f"[{datetime.now()}] Fertig. Datei gespeichert: '{OUTPUT_FILE_PATH}'")
 

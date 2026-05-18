@@ -2,13 +2,16 @@
 
 Default behavior
 ----------------
-- Only updates MatchIDs that already exist in `match_results_references.csv`
-  (so your reference set stays small).
+- The output CSV is always trimmed to the N most recent played matches
+  (by descending MatchID, which tracks kickoff order on api-football).
+  The cap is set by `--recent` (default 9). Rows that fall outside the
+  top N are dropped on every run, so the file never grows beyond N.
 
 Optional
 --------
-- Use `--add-missing` to also append every played MatchID found in
-  `match_statistics_filtered_78.csv`.
+- Use `--no-add-missing` to restrict updates to MatchIDs already in the
+  reference file (no new IDs are introduced, but the cap is still applied).
+- Use `--recent 0` to disable the cap and keep every played MatchID.
 
 Default paths match the ones used by `AI_match_stats_prediction.py`.
 """
@@ -20,6 +23,8 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
+DEFAULT_RECENT_LIMIT = 9
 
 
 def _norm_col(name: str) -> str:
@@ -122,37 +127,52 @@ def build_updates_from_match_stats(match_stats_path: Path) -> pd.DataFrame:
     return updates[["MatchID", "HomeGoals", "AwayGoals", "Result"]].copy()
 
 
-def merge_reference(existing: pd.DataFrame, updates: pd.DataFrame, *, add_missing: bool) -> pd.DataFrame:
+def merge_reference(
+    existing: pd.DataFrame,
+    updates: pd.DataFrame,
+    *,
+    add_missing: bool,
+    recent_limit: int | None = DEFAULT_RECENT_LIMIT,
+) -> pd.DataFrame:
     existing = existing.copy()
     updates = updates.copy()
 
     if existing.empty:
-        return updates.copy() if add_missing else existing
+        merged = updates.copy() if add_missing else existing
+    else:
+        existing["MatchID"] = pd.to_numeric(existing["MatchID"], errors="coerce")
+        updates["MatchID"] = pd.to_numeric(updates["MatchID"], errors="coerce")
+        existing = existing.dropna(subset=["MatchID"])
+        updates = updates.dropna(subset=["MatchID"])
 
-    existing["MatchID"] = pd.to_numeric(existing["MatchID"], errors="coerce")
-    updates["MatchID"] = pd.to_numeric(updates["MatchID"], errors="coerce")
-    existing = existing.dropna(subset=["MatchID"])
-    updates = updates.dropna(subset=["MatchID"])
+        existing = existing.set_index("MatchID", drop=False)
+        updates = updates.set_index("MatchID", drop=False)
 
-    existing = existing.set_index("MatchID", drop=False)
-    updates = updates.set_index("MatchID", drop=False)
+        merged = existing.copy()
+        intersect = merged.index.intersection(updates.index)
+        if len(intersect) > 0:
+            for col in ["HomeGoals", "AwayGoals", "Result"]:
+                merged.loc[intersect, col] = updates.loc[intersect, col]
 
-    merged = existing.copy()
-    intersect = merged.index.intersection(updates.index)
-    if len(intersect) > 0:
-        for col in ["HomeGoals", "AwayGoals", "Result"]:
-            merged.loc[intersect, col] = updates.loc[intersect, col]
+        if add_missing:
+            new_ids = updates.index.difference(merged.index)
+            if len(new_ids) > 0:
+                merged = pd.concat([merged, updates.loc[new_ids]], axis=0)
 
-    if add_missing:
-        new_ids = updates.index.difference(merged.index)
-        if len(new_ids) > 0:
-            merged = pd.concat([merged, updates.loc[new_ids]], axis=0)
-            merged = merged.sort_index(ascending=True)
+        merged = merged.reset_index(drop=True)
 
-    merged = merged.reset_index(drop=True)
+    if merged.empty:
+        return merged[["MatchID", "HomeGoals", "AwayGoals", "Result"]].copy()
+
     merged["MatchID"] = pd.to_numeric(merged["MatchID"], errors="coerce")
     merged = merged.dropna(subset=["MatchID"]).copy()
     merged["MatchID"] = merged["MatchID"].astype(int)
+
+    # Always trim the final result to the N most recent matches.
+    if recent_limit and recent_limit > 0:
+        merged = merged.sort_values("MatchID", ascending=False).head(recent_limit)
+
+    merged = merged.sort_values("MatchID", ascending=True).reset_index(drop=True)
     return merged[["MatchID", "HomeGoals", "AwayGoals", "Result"]].copy()
 
 
@@ -178,8 +198,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--add-missing",
+        dest="add_missing",
         action="store_true",
-        help="Also append all played MatchIDs from match_statistics_filtered_78.csv.",
+        default=True,
+        help="Append all played MatchIDs from match_statistics_filtered_78.csv (default).",
+    )
+    parser.add_argument(
+        "--no-add-missing",
+        dest="add_missing",
+        action="store_false",
+        help="Only refresh MatchIDs already present in match_results_references.csv.",
+    )
+    parser.add_argument(
+        "--recent",
+        type=int,
+        default=DEFAULT_RECENT_LIMIT,
+        help=(
+            "Trim the final output to the N most recent matches by descending "
+            f"MatchID (default: {DEFAULT_RECENT_LIMIT}; 0 = no cap, keep all)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -220,7 +257,12 @@ def main(argv: list[str]) -> int:
 
     existing = load_existing_reference(out_path)
     updates = build_updates_from_match_stats(match_stats_path)
-    merged = merge_reference(existing, updates, add_missing=args.add_missing)
+    merged = merge_reference(
+        existing,
+        updates,
+        add_missing=args.add_missing,
+        recent_limit=args.recent,
+    )
 
     existing_ids = (
         set(pd.to_numeric(existing["MatchID"], errors="coerce").dropna().astype(int).tolist())
@@ -232,12 +274,18 @@ def main(argv: list[str]) -> int:
         if not updates.empty
         else set()
     )
+    merged_ids = (
+        set(merged["MatchID"].astype(int).tolist()) if not merged.empty else set()
+    )
+    newly_added = merged_ids - existing_ids
 
     print(f"Match stats rows with results: {len(updates)}")
     print(f"Existing references before:    {len(existing)}")
     print(f"References after merge:        {len(merged)}")
     print(f"Updated existing MatchIDs:     {len(existing_ids & update_ids)}")
-    print(f"Newly added MatchIDs:          {len(update_ids - existing_ids) if args.add_missing else 0}")
+    print(f"Newly added MatchIDs:          {len(newly_added) if args.add_missing else 0}")
+    if args.add_missing and args.recent and args.recent > 0:
+        print(f"Recent cap applied:            {args.recent}")
     print(f"Output: {out_path}")
 
     if args.dry_run:

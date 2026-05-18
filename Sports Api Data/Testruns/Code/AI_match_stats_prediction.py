@@ -27,7 +27,7 @@ random.seed(RANDOM_STATE)
 # === PREDICTION TARGET SWITCH ===
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
-PREDICTION_MODE = 'future'
+PREDICTION_MODE = 'reference'
 REFERENCE_PREDICTION_LIMIT = None
 
 # === MATCH STATS SWITCH ===
@@ -1227,6 +1227,28 @@ def try_backfill_reference_from_future(ref_results):
     matched_rows = future_runs[future_runs['MatchID'].isin(ref_results.index)].copy()
     if matched_rows.empty:
         return pd.DataFrame(), pd.DataFrame()
+
+    existing_pred = read_optional_csv(PREDICTION_OUT_PATH)
+    if (not existing_pred.empty and 'PredictionSource' in existing_pred.columns
+            and 'RunID' in existing_pred.columns and 'MatchID' in existing_pred.columns):
+        existing_backfill = existing_pred[existing_pred['PredictionSource'] == 'future_backfill']
+        if not existing_backfill.empty:
+            existing_run_ids = pd.to_numeric(existing_backfill['RunID'], errors='coerce')
+            existing_match_ids = pd.to_numeric(existing_backfill['MatchID'], errors='coerce')
+            existing_valid = existing_run_ids.notna() & existing_match_ids.notna()
+            existing_pairs = set(zip(
+                existing_run_ids[existing_valid].astype(int).tolist(),
+                existing_match_ids[existing_valid].astype(int).tolist()
+            ))
+            new_run_ids = pd.to_numeric(matched_rows['RunID'], errors='coerce')
+            new_match_ids = pd.to_numeric(matched_rows['MatchID'], errors='coerce')
+            new_valid = new_run_ids.notna() & new_match_ids.notna()
+            expected_pairs = set(zip(
+                new_run_ids[new_valid].astype(int).tolist(),
+                new_match_ids[new_valid].astype(int).tolist()
+            ))
+            if expected_pairs and expected_pairs.issubset(existing_pairs):
+                return pd.DataFrame(), pd.DataFrame()
 
     if 'MatchStatsMode' not in matched_rows.columns:
         matched_rows['MatchStatsMode'] = 'predicted'
