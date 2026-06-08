@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Model Deep-Dive — GBR · Surrogate · BART</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --ink: #1a202c;
+    --muted: #5a6577;
+    --line: #e2e8f0;
+    --model: #2b6cb0;
+    --pos: #2f855a;
+    --neg: #c53030;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 40px 24px 90px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; }
+  .topnav {
+    max-width: 920px;
+    margin: 0 auto 26px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .topnav .brand { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+  .topnav .links a {
+    text-decoration: none;
+    color: var(--muted);
+    font-size: 14px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    margin-left: 6px;
+  }
+  .topnav .links a:hover { background: #eef2f7; color: var(--ink); }
+  .topnav .links a.active { background: var(--model); color: #fff; }
+
+  h1 { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; margin: 0 0 6px; }
+  .subtitle { color: var(--muted); font-size: 15px; margin: 0 0 26px; }
+
+  .jumpbar { display: flex; gap: 10px; margin: 0 0 34px; flex-wrap: wrap; }
+  .jumpbar a {
+    text-decoration: none; font-size: 13.5px; color: var(--ink);
+    background: var(--card); border: 1px solid var(--line);
+    padding: 8px 16px; border-radius: 999px;
+  }
+  .jumpbar a:hover { border-color: var(--model); color: var(--model); }
+
+  section.model { margin-bottom: 56px; scroll-margin-top: 20px; }
+  .model-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .model-head h2 { font-size: 22px; margin: 0; }
+  .pill {
+    font-size: 12px; font-weight: 600; color: #fff; background: var(--model);
+    padding: 3px 10px; border-radius: 999px;
+  }
+  .pill.stub { background: #a0aec0; }
+  .role { color: var(--muted); font-size: 15px; margin: 0 0 22px; }
+
+  h3 { font-size: 16px; margin: 28px 0 10px; }
+  p { margin: 0 0 14px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 18px 20px; margin: 14px 0;
+  }
+  .callout { border-left: 4px solid var(--model); background: #f5f9ff; }
+  .callout strong { color: var(--model); }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 18px; }
+  .chip {
+    font-size: 12.5px; background: #eef2f7; color: #3a4a63;
+    padding: 5px 12px; border-radius: 8px; font-weight: 500;
+  }
+
+  .formula {
+    font-family: "Consolas", "SF Mono", Menlo, monospace;
+    background: #1a202c; color: #e2e8f0;
+    padding: 14px 18px; border-radius: 10px;
+    font-size: 13.5px; overflow-x: auto; margin: 8px 0 18px;
+  }
+  .formula .dim { color: #94a3b8; }
+
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 18px; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 14px; border: 1px solid var(--line); vertical-align: top; }
+  th { background: #f1f5f9; font-weight: 600; }
+
+  ul { margin: 0 0 16px; padding-left: 22px; }
+  li { margin-bottom: 7px; }
+
+  .tree-wrap {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px; margin: 12px 0 8px;
+  }
+  .mermaid { display: flex; justify-content: center; }
+  .caption { font-size: 13px; color: var(--muted); text-align: center; margin-top: 6px; }
+
+  .chain { border-left: 4px solid var(--pos); background: #f1faf4; font-size: 14.5px; }
+
+  .stub-note {
+    color: var(--muted); font-style: italic; font-size: 14px;
+    background: #fbfcfe; border: 1px dashed var(--line);
+    border-radius: 10px; padding: 16px 18px;
+  }
+  code { background: #eef2f7; padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <nav class="topnav">
+    <span class="brand">ORAKEL · Model Blueprint</span>
+    <div class="links">
+      <a href="AI_prediction_model_flowchart.html">Flow Chart</a>
+      <a href="AI_models_detail.html" class="active">Model Deep-Dive</a>
+    </div>
+  </nav>
+
+  <div class="wrap">
+    <h1>Model Deep-Dive</h1>
+    <p class="subtitle">A closer look at the three machine-learning models inside <code>AI_match_stats_prediction.py</code>, written for someone new to the topic.</p>
+
+    <div class="jumpbar">
+      <a href="#gbr">GBR — Match-Stats Predictor</a>
+      <a href="#surrogate">Surrogate — Weight Picker</a>
+      <a href="#bart">BART — Outcome Model</a>
+    </div>
+
+    <!-- ================= GBR ================= -->
+    <section class="model" id="gbr">
+      <div class="model-head">
+        <span class="pill">Model 1</span>
+        <h2>GBR — Gradient Boosting Regressor</h2>
+      </div>
+      <p class="role">Predicts the in-game statistics (xG, shots, possession…) before a match is played, so the General signal has something to work with.</p>
+
+      <div class="card callout">
+        <strong>What problem is it solving?</strong> Before kick-off we don't know a match's in-game stats — but the General signal needs them. The GBR's whole job is: <em>"Given only what we know before kick-off (team form, head-to-head, player strength, weather), make an educated guess of what the in-game stats will be."</em> It is a <strong>regressor</strong>, meaning it predicts a <strong>number</strong> (like "14.2 shots"), not a category like win/lose.
+      </div>
+
+      <h3>The idea behind Gradient Boosting (simple version)</h3>
+      <p><strong>Start with a decision tree.</strong> A decision tree is just a flowchart of yes/no questions that ends in a guess. A single tree is <em>weak</em> — a rough guesser that makes lots of mistakes.</p>
+      <p><strong>Boosting = a relay of trees, each fixing the last one's mistakes.</strong> Instead of one big tree, gradient boosting builds many small trees one after another. The trick: each new tree doesn't predict the answer from scratch — it only predicts the <em>leftover error</em> of all the trees before it.</p>
+      <p>Think of <strong>putting in golf</strong>: the first swing gets you most of the way (tree 1's rough guess); the ball is still short — that gap is the "error"; the next putt covers the remaining distance (tree 2); then you're a little off, and the next putt covers that. Each stroke handles only what is <em>left over</em>, and together they sink the ball.</p>
+      <p>Two terms fall out of this:</p>
+      <ul>
+        <li><strong>"Gradient"</strong> — at each step it figures out the direction that reduces the error the most, and steps that way (like always aiming at the hole).</li>
+        <li><strong>"Learning rate"</strong> — how big each step is. Small, careful steps avoid overshooting.</li>
+      </ul>
+      <p>The settings it uses (scikit-learn defaults):</p>
+      <div class="chips">
+        <span class="chip">100 trees</span>
+        <span class="chip">each shallow — depth 3</span>
+        <span class="chip">learning rate 0.1</span>
+      </div>
+      <p>Lots of small, simple trees correcting each other. This kind of model is popular precisely because it is very good on spreadsheet-style data like yours.</p>
+
+      <h3>What a single tree actually looks like</h3>
+      <p>A common mix-up: "one GBR per stat" means each model <em>predicts</em> one stat — but every tree still <em>reads all ~33 pre-match inputs</em> to make that prediction. So the tree is not built from one stat; it asks questions about many inputs to guess one output. Here is one shallow tree from the model whose job is to predict <strong>HomeShots</strong>:</p>
+
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart TD
+    Q1{"Home form<br/>(last-5 goals) &gt; 1.8?"}
+    Q2{"Player strength<br/>difference &gt; 0.2?"}
+    Q3{"H2H avg goals<br/>(home) &gt; 1.5?"}
+    L1["-1.2 shots"]
+    L2["+0.4 shots"]
+    L3["+0.8 shots"]
+    L4["+2.1 shots"]
+    Q1 -->|no| Q2
+    Q1 -->|yes| Q3
+    Q2 -->|no| L1
+    Q2 -->|yes| L2
+    Q3 -->|no| L3
+    Q3 -->|yes| L4
+
+    classDef pos fill:#e6f4ec,stroke:#2f855a,color:#22543d,stroke-width:2px;
+    classDef neg fill:#fde8e8,stroke:#c53030,color:#742a2a,stroke-width:2px;
+    class L2,L3,L4 pos;
+    class L1 neg;
+        </pre>
+        <p class="caption">One tree from the "HomeShots" forest. Questions are about the inputs; leaves are small corrections, not final answers.</p>
+      </div>
+
+      <p>Two things to notice:</p>
+      <ul>
+        <li><strong>The questions are about the inputs</strong> (form, players, head-to-head, weather) — never about HomeShots itself. HomeShots is only the thing being predicted.</li>
+        <li><strong>The leaf numbers are nudges, not final answers.</strong> A single tree never says "14 shots." It says "+0.4" or "-1.2" — a small correction. The model starts from the overall average and then adds up the nudges from all 100 trees:</li>
+      </ul>
+      <div class="formula">final HomeShots = <span class="dim">12.5 (average)</span> + tree₁ + tree₂ + tree₃ + … + tree₁₀₀</div>
+      <p>That is the golf-putt idea again: each tree covers a bit of the remaining error. And there is a <strong>separate forest of 100 trees for every stat</strong> — one forest for HomeShots, another for AwayXG, another for HomePossession, and so on.</p>
+
+      <h3>How your project uses it, step by step</h3>
+
+      <p><strong>1 · One separate GBR per statistic.</strong> It does not build one model for everything. It loops over each target stat and trains a brand-new, dedicated GBR for each one.</p>
+      <table>
+        <tr>
+          <th>Inputs (same ~33 for every model)</th>
+          <th>Outputs (one model each)</th>
+        </tr>
+        <tr>
+          <td>Team form · Head-to-head · Player strength · Weather</td>
+          <td>xG, shots, shots on target, possession, passes, pass accuracy, fouls, cards, corners, offsides</td>
+        </tr>
+      </table>
+
+      <p><strong>2 · It learns from past played matches.</strong> Those are the only games where it can see <em>both</em> the pre-match info and the real in-game stats that actually happened — that is how it learns the link between "what we knew before" and "what happened."</p>
+
+      <p><strong>3 · The "5-fold out-of-fold" trick (honest self-grading).</strong> These predicted stats later feed BART, so the GBR must not be allowed to predict a training match it has already memorised (that would be <em>overfitting</em>). So for training rows it uses 5-fold cross-validation:</p>
+      <ul>
+        <li>Split the played matches into 5 equal piles.</li>
+        <li>Train on 4 piles, predict the 5th (the one it did <em>not</em> see).</li>
+        <li>Rotate, so every pile is predicted by a model that never saw it.</li>
+      </ul>
+      <p>No match is ever predicted by a model that already knew its answer. (For future matches it then trains on <em>all</em> the data and predicts those.)</p>
+
+      <p><strong>4 · The median safety net.</strong> If a stat has too little history — fewer than 25 usable past matches, or every value is identical (nothing to learn) — it does not trust a model at all and falls back to the <strong>median</strong> (the typical past value). Better a safe average than a wild guess.</p>
+
+      <p><strong>5 · Tidying up the raw numbers.</strong> A raw model can output unrealistic values, so a cleanup step:</p>
+      <ul>
+        <li>Forces home + away <strong>possession to add up to 100%</strong>.</li>
+        <li><strong>Rounds counts</strong> (shots, corners, cards) to whole numbers ≥ 0.</li>
+        <li><strong>Caps percentages</strong> between 0 and 100.</li>
+      </ul>
+
+      <h3>Where it fits in the bigger picture</h3>
+      <div class="card chain">
+        ~33 pre-match inputs → <strong>GBR</strong> (one forest per stat) → predicted match stats → squeezed into the <strong>General signal</strong> → joins H2H + Player + weather → <strong>BART</strong> → goal difference → Win / Draw / Loss %
+      </div>
+      <p>One reminder: the GBR only runs in <strong>"predicted" mode</strong> (used for future games). In the default re-test mode it uses the <em>real</em> stats instead, so the GBR is skipped there.</p>
+    </section>
+
+    <!-- ================= SURROGATE ================= -->
+    <section class="model" id="surrogate">
+      <div class="model-head">
+        <span class="pill">Model 2</span>
+        <h2>Surrogate — Weight Picker (the full bottom-to-top picture)</h2>
+      </div>
+      <p class="role">The surrogate's whole job is to find good <em>weights</em>. So to understand it we follow the entire machine from a single random weight at the bottom, up to the score the surrogate learns from — then how the surrogate uses that score to pick better weights.</p>
+
+      <div class="card callout">
+        <strong>What problem is it solving?</strong> Every run uses a different weight setting (the dials). Trying one setting <em>for real</em> is slow — you must build the signals, train BART, and score it. There are far too many settings to test them all. The word <strong>surrogate</strong> means "stand-in": a fast stand-in that predicts how well a setting would score in a split second, so the program only runs the most promising ones for real.
+      </div>
+
+      <h3>The idea (simple version)</h3>
+      <p>Think of a <strong>flight simulator</strong>. Flying a real test plane for every tiny tweak is slow and expensive. A simulator tuned on thousands of past flights can tell you "this configuration will probably fly well" in seconds — so you only take the best few into a real flight. The surrogate is that simulator, but for weight settings.</p>
+
+      <h3>Part 1 — What the surrogate is optimising: from one weight up to a score</h3>
+      <p>Before the surrogate can pick good weights, those weights first have to turn into a score. Here is that whole journey, bottom to top. Each layer takes the numbers from the layer below, transforms them, and hands the result up.</p>
+
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart BT
+    L0["random weight w<br/>(a number from 0 to 2)"]
+    L1["one stat: home minus away"]
+    L2["weighted average within a subgroup"]
+    L3["blend subgroups 55 / 30 / 15"]
+    L4["× base multiplier<br/>= General / H2H / Player signal"]
+    L5["10-column design matrix<br/>(3 signals + 7 weather columns)"]
+    L6["BART · 200 trees<br/>→ goal difference"]
+    L7["normal curve (±0.5 draw zone)<br/>→ Win / Draw / Loss %"]
+    L8["score: AvgNLL + Accuracy"]
+    L9["SURROGATE + Pareto<br/>pick the best weight bundles"]
+    L0 --> L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7 --> L8 --> L9
+    L9 -. smarter weights next round .-> L0
+    classDef model fill:#2b6cb0,stroke:#1a365d,stroke-width:3px,color:#fff,font-weight:bold;
+    class L9 model;
+        </pre>
+        <p class="caption">Read upward. Layers 0–8 turn weights into a score; the surrogate (top) uses that score to choose the next weights. BART (Layer 6) and the normal curve (Layer 7) are explained in full in the BART section.</p>
+      </div>
+
+      <p>Following the <strong>GoalCreation</strong> subgroup of one match the whole way up — read top-down, each row's result feeds the next:</p>
+      <table>
+        <tr><th>Layer</th><th>Function / step</th><th>What it does to the layer below</th><th>Running example</th></tr>
+        <tr><td><strong>0</strong></td><td><code>generate_candidate_df</code></td><td>Draws each weight as a random number in [0, 2)</td><td>W_XG = 1.4 · W_SoT = 0.84 · W_Shots = 1.2</td></tr>
+        <tr><td><strong>1</strong></td><td>per-stat value</td><td>Turns each raw stat into a home − away difference</td><td>XG +0.7 · SoT +2 · Shots +5</td></tr>
+        <tr><td><strong>2</strong></td><td><code>weighted_signal_from_specs</code></td><td>Weighted average of those differences: Σ(v·w) ÷ Σw</td><td>(0.98+1.68+6.0) ÷ 3.44 = <strong>2.52</strong></td></tr>
+        <tr><td><strong>3</strong></td><td><code>GENERAL_SUBGROUP_BLEND</code></td><td>Blends the 3 subgroups 55 / 30 / 15</td><td>0.55·2.52 + 0.30·1.0 + 0.15·0.4 = <strong>1.75</strong></td></tr>
+        <tr><td><strong>4</strong></td><td><code>build_outcome_design_matrix</code></td><td>Multiplies by the group's base multiplier</td><td>1.75 × 1.2 = <strong>General signal 2.10</strong></td></tr>
+        <tr><td><strong>5</strong></td><td>assemble row</td><td>Places it next to H2H, Player &amp; 7 weather columns</td><td>[ 2.10 , H2H , Player , weather×7 ]</td></tr>
+        <tr><td><strong>6</strong></td><td><code>SklearnModel</code> (BART)</td><td>200 trees read the row, output a goal difference</td><td>predicted goal diff = <strong>+0.8</strong></td></tr>
+        <tr><td><strong>7</strong></td><td><code>normal_cdf</code></td><td>Spreads ±0.5 around the number into 3 probabilities</td><td>Win .59 · Draw .25 · Lose .16</td></tr>
+        <tr><td><strong>8</strong></td><td>scoring</td><td>Compares to the real result: −log(p) + correct?</td><td>actual H → NLL 0.53 · correct ✅</td></tr>
+      </table>
+
+      <p>The two hand-offs where the weights actually bite:</p>
+      <div class="formula">GoalCreation = <span class="dim">(0.7×1.4 + 2×0.84 + 5×1.2)</span> / <span class="dim">(1.4 + 0.84 + 1.2)</span> = 8.66 / 3.44 = 2.52</div>
+      <div class="formula">General_BaseSignal = (0.55·GoalCreation + 0.30·GameControl + 0.15·Discipline) × BaseMultiplier_General</div>
+      <p>Two things to remember: the weights are <strong>born random</strong> at Layer 0 — nothing calculates them — and the weighted average at Layer 2 divides by Σw, so only the <em>relative</em> weights inside a subgroup matter; the base multiplier (Layer 4) sets the overall loudness.</p>
+
+      <h3>Part 2 — What the surrogate does with that score (step by step)</h3>
+      <p>Now the surrogate itself. It learns the pattern <em>weight setting → score</em>, then uses it to choose which settings are worth actually running. Its exact process each round:</p>
+
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart LR
+    H[("Run history<br/>(≥100 valid past runs)")]
+    T["Train 2 stand-in models:<br/>one predicts AvgNLL,<br/>one predicts Accuracy"]
+    G["Generate 300 random<br/>weight settings"]
+    P["Predict each one's score<br/>(milliseconds — no BART)"]
+    S{"Keep the best:<br/>80% top trade-offs (exploit)<br/>+ 20% random (explore)"}
+    R["Run only these for real<br/>(Layers 0–8 above)"]
+    H --> T --> G --> P --> S --> R
+    R -->|new scores appended| H
+    classDef model fill:#2b6cb0,stroke:#1a365d,stroke-width:3px,color:#fff,font-weight:bold;
+    class T model;
+        </pre>
+        <p class="caption">The surrogate loop, sitting on top of the bottom-to-top stack.</p>
+      </div>
+
+      <p><strong>Step 1 · Load the history.</strong> Read the run-history file and keep only valid, comparable rows: same stats-mode, source-mode and feature-schema, with non-empty scores.</p>
+      <p><strong>Step 2 · Decide whether to use the surrogate.</strong> If fewer than <strong>100</strong> valid rows survive, skip it and just generate random settings (pure random search). Otherwise continue.</p>
+      <p><strong>Step 3 · Train two stand-in models.</strong> One learns <code>setting → AvgNLL</code>, the other <code>setting → Accuracy</code>. The input is the full weight bundle plus the H2H value <code>k</code>.</p>
+      <table>
+        <tr><th>Input (one full weight setting)</th><th>Outputs (two separate predictions)</th></tr>
+        <tr><td>All per-feature dials + base multipliers + <code>k</code></td><td><strong>Predicted AvgNLL</strong> (lower is better) · <strong>Predicted Accuracy</strong> (higher is better)</td></tr>
+      </table>
+      <p>It models <strong>both</strong> because they can disagree — a setting can be accurate but over-confident, or well-calibrated but slightly less accurate.</p>
+      <p><strong>Step 4 · Generate 300 random candidates.</strong> Each is just a fresh bundle of random weights (Layer 0) plus a random <code>k</code>.</p>
+      <p><strong>Step 5 · Predict every candidate's score</strong> with the two models — milliseconds, no BART involved.</p>
+      <p><strong>Step 6 · Select which to actually run</strong>, using two ideas:</p>
+      <ul>
+        <li><strong>Pareto front (best trade-offs).</strong> Picture the 300 guesses as dots on a chart (AvgNLL vs Accuracy). The Pareto front is the leading edge — settings where you can't improve one score without worsening the other. These are the <em>exploit</em> picks.</li>
+        <li><strong>Exploit vs explore.</strong> 80% of the budget runs the Pareto-best (use what works); 20% runs purely random settings (so the search never gets stuck, and can find regions the surrogate hasn't seen).</li>
+      </ul>
+      <p><strong>Step 7 · Run only the chosen settings for real</strong> — that means sending each one up through Layers 0–8 (build signals → BART → probabilities → score).</p>
+      <p><strong>Step 8 · Append the results to the history</strong>, so next round the surrogate trains on more data and picks better. Two details: history is <strong>always read from the reference folder</strong>; future-mode runs only become useful training data after they have been scored against real results (Stage 4 backfill).</p>
+
+      <div class="chips">
+        <span class="chip">Default engine: Gradient Boosting</span>
+        <span class="chip">or a small Neural Net (64→32)</span>
+        <span class="chip">needs ≥100 valid past runs</span>
+        <span class="chip">300 candidates per round</span>
+        <span class="chip">80% exploit / 20% explore</span>
+      </div>
+      <p>The default engine is itself a <strong>Gradient Boosting model</strong> (same family as Model 1) — but here it predicts <em>scores of settings</em>, not match stats.</p>
+
+      <h3>Where it fits in the bigger picture</h3>
+      <div class="card chain">
+        random weights → (Layers 1–7) → score → <strong>Surrogate</strong> predicts scores for 300 candidates → Pareto-best + random → run the winners for real → new scores → history → smarter weights next round
+      </div>
+      <p>So the surrogate never predicts a match — it predicts <em>how good a weight setting is</em>, turning a blind, expensive search into a guided one.</p>
+    </section>
+
+    <!-- ================= BART ================= -->
+    <section class="model" id="bart">
+      <div class="model-head">
+        <span class="pill">Model 3</span>
+        <h2>BART — Outcome Model (how the model is built)</h2>
+      </div>
+      <p class="role">Bayesian Additive Regression Trees — a sum of 200 small decision trees. What makes BART special isn't the trees themselves but <em>how they are grown and re-grown</em>: by splitting, pruning and resampling, over and over.</p>
+
+      <div class="card callout">
+        <strong>The core shape:</strong> BART's prediction is simply the <strong>sum of 200 small trees</strong>. Each tree reads the match's signal row and outputs a small nudge; the nudges add up to the predicted goal difference. Everything below is about how each of those trees is actually constructed.
+      </div>
+      <div class="formula">prediction = tree₁ + tree₂ + tree₃ + … + tree₂₀₀</div>
+
+      <h3>1 · The building block — a single tree (splits &amp; leaves)</h3>
+      <p>A regression tree is a flowchart of yes/no questions. Each question is a <strong>split</strong>: it picks one input and a threshold and divides the matches into two groups. At the bottom sit the <strong>leaves</strong>, each holding one number — the nudge for any match that lands there.</p>
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart TD
+    A{"split:<br/>General signal &gt; 1.5 ?"}
+    B{"split:<br/>H2H signal &gt; 0 ?"}
+    C{"split:<br/>Player signal &gt; 0.3 ?"}
+    D["leaf: −0.2"]
+    E["leaf: +0.1"]
+    F["leaf: +0.4"]
+    G["leaf: +1.1"]
+    A -->|no| B
+    A -->|yes| C
+    B -->|no| D
+    B -->|yes| E
+    C -->|no| F
+    C -->|yes| G
+        </pre>
+        <p class="caption">One small tree: internal nodes are <em>splits</em>; leaves hold the <em>nudge</em>. A match follows the answers down to exactly one leaf.</p>
+      </div>
+
+      <h3>2 · How a tree changes shape — the moves</h3>
+      <p>BART never builds a tree once and freezes it. It keeps reshaping every tree with small random <strong>moves</strong>:</p>
+      <ul>
+        <li><strong>GROW</strong> — take a leaf and turn it into a new split (add detail). This is the "growth" step.</li>
+        <li><strong>PRUNE</strong> — the opposite: remove a split and merge its two leaves back into one (simplify).</li>
+        <li><strong>CHANGE</strong> — keep the shape but change a split's rule (a different input or threshold).</li>
+        <li><strong>SWAP</strong> — swap the split rules between a parent node and its child.</li>
+      </ul>
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart LR
+    subgraph BEFORE["before"]
+      L["leaf: +0.2"]
+    end
+    subgraph AFTER["after a GROW move"]
+      S{"split:<br/>Shots diff &gt; 3 ?"}
+      L1["leaf: +0.1"]
+      L2["leaf: +0.5"]
+      S -->|no| L1
+      S -->|yes| L2
+    end
+    L -. GROW adds one split .-> S
+        </pre>
+        <p class="caption">A GROW move: one leaf becomes a split with two new leaves. PRUNE is this same picture in reverse.</p>
+      </div>
+
+      <h3>3 · How BART learns — Bayesian backfitting (MCMC)</h3>
+      <p>This is the big difference from the GBR. The GBR builds each tree once, greedily. BART instead loops over the trees again and again, gently improving each one with the moves above. One pass works like this:</p>
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart LR
+    R["pick one tree ·<br/>compute its partial residual<br/>(target − all OTHER trees)"]
+    M["propose a move:<br/>GROW / PRUNE / CHANGE / SWAP"]
+    A{"accept?<br/>(Metropolis rule)"}
+    V["resample the leaf values<br/>+ the error spread σ"]
+    R --> M --> A
+    A -->|usually, if it fits better| V
+    A -->|sometimes reject| V
+    V -->|next tree → repeat<br/>for many iterations| R
+        </pre>
+        <p class="caption">The backfitting loop: each tree is re-fit only to what the other 199 trees can't yet explain.</p>
+      </div>
+      <ul>
+        <li><strong>Partial residual</strong> — before touching a tree, BART subtracts every <em>other</em> tree's output from the target. So each tree only has to explain the leftover the rest are missing.</li>
+        <li><strong>Accept / reject</strong> — a proposed move that fits that leftover better (without making the tree too complex) is likely accepted; otherwise likely rejected. Occasionally a slightly worse move is accepted anyway, which lets BART escape dead ends.</li>
+        <li><strong>Resample</strong> — the leaf numbers and the overall error spread σ are then drawn fresh from their probability distributions.</li>
+        <li><strong>Repeat</strong> — this runs for many iterations. An early "warm-up" stretch is discarded; the rest are kept as samples.</li>
+      </ul>
+
+      <h3>4 · What keeps the trees small — the priors</h3>
+      <p>Left unchecked, trees would grow huge and memorise the data. BART prevents this with built-in <strong>priors</strong> — gentle rules that favour simplicity:</p>
+      <ul>
+        <li><strong>Depth prior</strong> — the deeper a node, the less likely it is allowed to split. So trees stay <em>shallow</em>; each one is only a weak learner.</li>
+        <li><strong>Leaf prior</strong> — leaf values are pulled toward zero, so no single tree can dominate the sum.</li>
+      </ul>
+      <p>This is why 200 small, cautious trees beat one big tree: each captures a little, and together they are accurate without overfitting.</p>
+
+      <h3>5 · The output — a prediction with built-in uncertainty</h3>
+      <p>Because BART is probabilistic, it can express how unsure it is, not just give a point guess. In this project the predicted goal difference is taken as the answer, and the model's typical error on the training matches — the spread <strong>σ</strong> of its residuals — is used as the uncertainty. That σ is exactly what the next step needs to turn the single number into Win / Draw / Loss probabilities (a bell curve with a ±0.5-goal draw zone).</p>
+
+      <h3>BART vs GBR at a glance</h3>
+      <table>
+        <tr><th></th><th>GBR (Model 1)</th><th>BART (Model 3)</th></tr>
+        <tr><td>How trees are built</td><td>once, greedily, to fit residuals</td><td>re-grown repeatedly by random moves</td></tr>
+        <tr><td>Driven by</td><td>gradients + learning rate</td><td>probability + Metropolis accept/reject</td></tr>
+        <tr><td>Keeps trees small via</td><td>fixed shallow depth</td><td>depth &amp; leaf priors</td></tr>
+        <tr><td>Output</td><td>one number</td><td>a distribution → number + uncertainty σ</td></tr>
+      </table>
+
+      <h3>Where it fits in the bigger picture</h3>
+      <div class="card chain">
+        signal row → <strong>BART</strong>: sum of 200 trees, each grown by GROW / PRUNE / CHANGE / SWAP inside an MCMC loop → goal difference + σ → bell curve → Win / Draw / Loss %
+      </div>
+      <p>One note: BART is re-fitted for <em>every</em> weight setting the search tries — so in a single program run this whole MCMC procedure runs hundreds of times, once per candidate.</p>
+    </section>
+  </div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+      fontSize: "14px",
+      primaryColor: "#eef2f7",
+      primaryBorderColor: "#b4c2d6",
+      primaryTextColor: "#1a202c",
+      lineColor: "#7a8aa0"
+    },
+    flowchart: { nodeSpacing: 40, rankSpacing: 48, curve: "basis", useMaxWidth: true }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sports Prediction System — Paper Drawing Blueprint</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2d3148;
+    --accent-blue: #4f8ef7;
+    --accent-green: #3ecf8e;
+    --accent-orange: #f7a24f;
+    --accent-purple: #a78bfa;
+    --accent-red: #f87171;
+    --accent-yellow: #fbbf24;
+    --text: #e2e8f0;
+    --text-muted: #8892a4;
+    --node-bg: #252a3a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.6rem; color: var(--accent-blue); margin-bottom: 4px; }
+  .subtitle { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 32px; }
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 28px;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 3px 9px;
+    border-radius: 20px;
+    text-transform: uppercase;
+  }
+  .badge-mindmap { background: rgba(167,139,250,0.2); color: var(--accent-purple); border: 1px solid rgba(167,139,250,0.4); }
+  .badge-flowchart { background: rgba(79,142,247,0.2); color: var(--accent-blue); border: 1px solid rgba(79,142,247,0.4); }
+  .section-title { font-size: 1.1rem; font-weight: 600; color: var(--text); }
+  .section-hint { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; font-style: italic; }
+
+  /* --- MINDMAP STYLES --- */
+  .mindmap { display: flex; flex-direction: column; gap: 16px; }
+  .mm-center {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-blue);
+    color: #fff;
+    font-weight: 700;
+    font-size: 1rem;
+    padding: 10px 22px;
+    border-radius: 30px;
+    align-self: flex-start;
+    margin-bottom: 4px;
+  }
+  .mm-branches { display: flex; flex-wrap: wrap; gap: 12px; }
+  .mm-branch {
+    background: var(--node-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    min-width: 180px;
+    max-width: 240px;
+    flex: 1;
+  }
+  .mm-branch-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mm-leaf {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    padding: 2px 0 2px 14px;
+    border-left: 2px solid var(--border);
+    margin-top: 3px;
+    line-height: 1.4;
+  }
+  .mm-leaf strong { color: var(--text); font-weight: 600; }
+
+  /* --- FLOWCHART STYLES --- */
+  .flowchart { display: flex; flex-direction: column; gap: 0; }
+  .fc-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .fc-spine {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 48px;
+    flex-shrink: 0;
+  }
+  .fc-node-wrap { flex: 1; padding: 0 0 0 8px; margin-bottom: 6px; }
+  .fc-node {
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 0.84rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    background: var(--node-bg);
+    position: relative;
+  }
+  .fc-node.start { background: rgba(79,142,247,0.15); border-color: var(--accent-blue); color: var(--accent-blue); font-weight: 700; border-radius: 30px; }
+  .fc-node.process { background: var(--node-bg); }
+  .fc-node.decision { background: rgba(251,191,36,0.1); border-color: var(--accent-yellow); border-style: dashed; }
+  .fc-node.model { background: rgba(62,207,142,0.1); border-color: var(--accent-green); }
+  .fc-node.output { background: rgba(248,113,113,0.1); border-color: var(--accent-red); }
+  .fc-node.sub { background: rgba(167,139,250,0.08); border-color: var(--accent-purple); font-size: 0.78rem; color: var(--text-muted); margin: 2px 0 2px 20px; }
+  .fc-node-title { font-weight: 600; margin-bottom: 2px; }
+  .fc-node-detail { font-size: 0.75rem; color: var(--text-muted); margin-top: 3px; line-height: 1.4; }
+  .fc-arrow {
+    width: 2px;
+    background: var(--border);
+    height: 20px;
+    margin: 0 auto;
+  }
+  .fc-arrowhead {
+    width: 0; height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 7px solid var(--border);
+    margin: 0 auto;
+  }
+  .fc-label-arrow {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-align: center;
+    font-style: italic;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 0.68rem;
+    padding: 1px 7px;
+    border-radius: 12px;
+    margin-left: 6px;
+    font-weight: 600;
+    vertical-align: middle;
+  }
+  .tag-blue { background: rgba(79,142,247,0.2); color: var(--accent-blue); }
+  .tag-green { background: rgba(62,207,142,0.2); color: var(--accent-green); }
+  .tag-orange { background: rgba(247,162,79,0.2); color: var(--accent-orange); }
+  .tag-purple { background: rgba(167,139,250,0.2); color: var(--accent-purple); }
+  .tag-red { background: rgba(248,113,113,0.2); color: var(--accent-red); }
+
+  /* --- LAYOUT GUIDE --- */
+  .layout-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .layout-cell {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 0.82rem;
+  }
+  .layout-cell strong { display: block; color: var(--accent-blue); margin-bottom: 4px; }
+  .layout-cell span { color: var(--text-muted); }
+  .layout-cell.full { grid-column: 1 / -1; }
+  .layout-cell.accent-green { border-color: rgba(62,207,142,0.4); }
+  .layout-cell.accent-purple { border-color: rgba(167,139,250,0.4); }
+  .layout-cell.accent-orange { border-color: rgba(247,162,79,0.4); }
+  .layout-cell.accent-red { border-color: rgba(248,113,113,0.4); }
+
+  .tip {
+    background: rgba(79,142,247,0.08);
+    border: 1px solid rgba(79,142,247,0.25);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 12px;
+  }
+  .tip strong { color: var(--accent-blue); }
+
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 800px) { .cols2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>🗺 Sports Prediction System — Drawing Blueprint</h1>
+<p class="subtitle">Open this on-screen while drawing on paper. All nodes, branches, and arrows are defined below.</p>
+
+<!-- ===================== PAGE LAYOUT GUIDE ===================== -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">📐 Recommended Paper Layout (A2 / A1 landscape)</div>
+  </div>
+  <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:12px;">Divide your paper into 5 zones. Top-to-bottom flow, left-to-right within each zone.</p>
+  <div class="layout-grid">
+    <div class="layout-cell full">
+      <strong>① TOP — Mindmap: Data Sources</strong>
+      <span>Center node "DATA SOURCES" → 3 branches: Sports API · Weather API · BWIN/Odds Scraper</span>
+    </div>
+    <div class="layout-cell accent-green">
+      <strong>② LEFT-CENTER — Flowchart: Main System Pipeline</strong>
+      <span>Raw Data → Feature Engineering → Match Stats Layer (GBR) → Outcome Model (BART) → Outputs</span>
+    </div>
+    <div class="layout-cell accent-purple">
+      <strong>③ RIGHT-CENTER — Mindmap: Model Architecture</strong>
+      <span>Center "PREDICTION SYSTEM" → 3 bases + Surrogate System</span>
+    </div>
+    <div class="layout-cell accent-orange full">
+      <strong>④ BOTTOM-LEFT — Flowchart: Backtesting Process</strong>
+      <span>Select MD → Set cutoff → Run pipeline → Copy outputs → Aggregate → Compare BWIN</span>
+    </div>
+    <div class="layout-cell accent-red full">
+      <strong>⑤ BOTTOM-RIGHT — Flowchart: Future Prediction Mode</strong>
+      <span>Upcoming fixtures → Filter injured → Weight squad → Predict stats → BART → Candidate ranking</span>
+    </div>
+  </div>
+  <div class="tip"><strong>Tip:</strong> Use colour coding per zone on paper — one pen colour per section. Connect zones ① → ② with a thick arrow labelled "feeds into pipeline".</div>
+</div>
+
+
+<!-- ===================== MINDMAP 1: DATA SOURCES ===================== -->
+<div class="section">
+  <div class="section-header">
+    <span class="badge badge-mindmap">Mindmap ①</span>
+    <div class="section-title">Data Sources</div>
+    <div class="section-hint">Draw at the TOP of the paper</div>
+  </div>
+  <div class="mindmap">
+    <div class="mm-center">DATA SOURCES</div>
+    <div class="mm-branches">
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-blue)"></div> Sports API (API-Football)</div>
+        <div class="mm-leaf"><strong>Stammdaten_78.csv</strong> — MatchID, Date, Season, Matchday, Gespielt</div>
+        <div class="mm-leaf"><strong>match_statistics_filtered_78.csv</strong> — Goals, Shots, Possession, Passes, Fouls, Cards, Corners, Offsides</div>
+        <div class="mm-leaf"><strong>lineups_league_78.csv</strong> — Starting XI per match</div>
+        <div class="mm-leaf"><strong>injuries_league_78.csv</strong> — Injured / suspended players</div>
+        <div class="mm-leaf"><strong>player_statistics_per_fixture.csv</strong> — Individual player stats per game</div>
+        <div class="mm-leaf"><strong>players_profiles_78.json</strong> — Position, age, transfer value</div>
+        <div class="mm-leaf"><strong>Teams_78.csv</strong> — Team metadata</div>
+      </div>
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-green)"></div> Weather API (Open-Meteo)</div>
+        <div class="mm-leaf"><strong>historical_weather_data_78.csv</strong> — Matched per fixture by date + city coords</div>
+        <div class="mm-leaf"><strong>future_weather_data_78.csv</strong> — Forecast for upcoming matches</div>
+        <div class="mm-leaf"><strong>city_coordinates_78.csv</strong> — Stadium lat/lon lookup</div>
+        <div class="mm-leaf">Features: temperature, wind, precipitation, cloud cover</div>
+      </div>
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-orange)"></div> BWIN Odds Scraper (Selenium)</div>
+        <div class="mm-leaf"><strong>bwin_historical_odds_*.csv</strong> — Home / Draw / Away odds per match</div>
+        <div class="mm-leaf">Used only in backtesting comparison — not fed into the model</div>
+        <div class="mm-leaf">Implicit bookmaker probability = 1 / odds (minus margin)</div>
+      </div>
+
+    </div>
+  </div>
+  <div class="tip"><strong>Drawing note:</strong> Draw center bubble "DATA SOURCES" in the middle-top. Three thick lines radiate out. Each branch has its label, then 4–7 sub-leaves hanging below it with thin lines.</div>
+</div>
+
+
+<!-- ===================== FLOWCHART: MAIN SYSTEM PIPELINE ===================== -->
+<div class="section">
+  <div class="section-header">
+    <span class="badge badge-flowchart">Flowchart ②</span>
+    <div class="section-title">Main System Pipeline</div>
+    <div class="section-hint">Draw LEFT-CENTER, top-to-bottom</div>
+  </div>
+
+  <div class="cols2">
+    <div class="flowchart">
+
+      <div class="fc-node start">START — Raw CSV Data</div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Feature Engineering</div>
+        <div class="fc-node-detail">
+          • Base team strength (season avg goals for/against)<br>
+          • Rolling last-5 form (goals, results)<br>
+          • H2H features (K recent meetings, reliability scaling)<br>
+          • Weather context (temp, wind, rain)<br>
+          • HomeTeamID / AwayTeamID
+        </div>
+      </div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node decision">
+        <div class="fc-node-title">⬡ MATCH_STATS_MODE?</div>
+        <div class="fc-node-detail">
+          <strong>"predicted"</strong> → run GBR layer (future &amp; honest backtest)<br>
+          <strong>"actual"</strong> → use real stats (reference eval only)<br>
+          <strong>"off"</strong> → skip stats entirely
+        </div>
+      </div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node model">
+        <div class="fc-node-title">Match Stats Prediction Layer <span class="tag tag-green">GBR</span></div>
+        <div class="fc-node-detail">
+          • One GradientBoostingRegressor per stat target<br>
+          • 5-fold cross-validation (leakage-safe OOF for training rows)<br>
+          • Pre-match inputs only (no current-match stats, no result)<br>
+          • Targets: Possession, Shots, ShotsOnTarget, Passes, PassAccuracy, Fouls, YellowCard, RedCard, Offsides, Corners (Home &amp; Away)
+        </div>
+      </div>
+      <div style="height:8px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:8px"></div><div class="fc-arrowhead"></div></div>
+      <div class="fc-node sub">Post-process: clip possession 0–100 · normalize to sum 100 · clip count stats ≥ 0 · round integers</div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node model">
+        <div class="fc-node-title">Outcome Model <span class="tag tag-purple">BART</span></div>
+        <div class="fc-node-detail">
+          • <strong>200 Monte Carlo runs</strong> — sample one weight per feature + one H2H_K integer per run<br>
+          • Feature weighting groups: Goal Creation (high) · Game Control (med) · Discipline (low)<br>
+          • H2H reliability scaling per sampled K<br>
+          • Median imputation for missing values<br>
+          • Train BART on <strong>GoalDiff = HomeGoals − AwayGoals</strong>
+        </div>
+      </div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Convert GoalDiff → Probabilities</div>
+        <div class="fc-node-detail">
+          WinProb · DrawProb · LoseProb (logistic / threshold mapping)<br>
+          Estimated scoreline (Home Goals · Away Goals)
+        </div>
+      </div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Surrogate Selection</div>
+        <div class="fc-node-detail">
+          • Load surrogate_run_history.csv (filtered by MatchStatsMode)<br>
+          • Select top runs by Pareto front (accuracy vs. calibration)<br>
+          • Re-use best weight configurations for future predictions
+        </div>
+      </div>
+      <div style="height:12px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:12px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node output">
+        <div class="fc-node-title">Outputs</div>
+        <div class="fc-node-detail">
+          📄 prediction_weight_runs.csv — all 200 runs<br>
+          📄 prediction_weight_run_summary.csv — aggregated<br>
+          📄 pareto_front.csv (reference mode)<br>
+          📄 future_candidate_ranking.csv (future mode)<br>
+          📄 predicted_match_stats.csv (when mode = predicted)
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right column: legend / notes -->
+    <div>
+      <div class="section" style="margin-bottom:16px; padding:16px;">
+        <div style="font-size:0.85rem; font-weight:600; color:var(--accent-green); margin-bottom:10px;">Leakage Controls (critical!)</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.7;">
+          <strong style="color:var(--text)">①</strong> Match-stats GBR uses only pre-match inputs (no result, no in-game stats)<br>
+          <strong style="color:var(--text)">②</strong> In reference mode: held-out matches are removed from training set<br>
+          <strong style="color:var(--text)">③</strong> In predicted mode: training rows receive OOF stat predictions, not their real stats<br>
+          <strong style="color:var(--text)">④</strong> BACKTEST_DATE_CUTOFF filters all training rows with Date ≥ cutoff
+        </div>
+      </div>
+      <div class="section" style="padding:16px;">
+        <div style="font-size:0.85rem; font-weight:600; color:var(--accent-purple); margin-bottom:10px;">Feature Groups (in BART)</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.7;">
+          <span style="color:var(--accent-orange)">▶ Goal Creation</span> (highest weight)<br>
+          &nbsp;&nbsp;xG proxy, Shots on Target, Shots<br><br>
+          <span style="color:var(--accent-blue)">▶ Game Control</span> (medium weight)<br>
+          &nbsp;&nbsp;Possession, Passes, Pass Accuracy<br><br>
+          <span style="color:var(--text-muted)">▶ Discipline / Set Piece</span> (lowest weight)<br>
+          &nbsp;&nbsp;Fouls, Yellow Cards, Red Cards, Corners, Offsides
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===================== MINDMAP 2: MODEL ARCHITECTURE ===================== -->
+<div class="section">
+  <div class="section-header">
+    <span class="badge badge-mindmap">Mindmap ③</span>
+    <div class="section-title">Model Architecture</div>
+    <div class="section-hint">Draw RIGHT-CENTER of the paper</div>
+  </div>
+  <div class="mindmap">
+    <div class="mm-center">PREDICTION SYSTEM</div>
+    <div class="mm-branches">
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-green)"></div> GBR Match Stats Layer</div>
+        <div class="mm-leaf"><strong>Input:</strong> base strength, rolling form, H2H, weather, TeamIDs</div>
+        <div class="mm-leaf"><strong>Model:</strong> GradientBoostingRegressor × 22 targets</div>
+        <div class="mm-leaf"><strong>CV:</strong> 5-fold, OOF predictions for train rows</div>
+        <div class="mm-leaf"><strong>Output:</strong> predicted_match_stats.csv</div>
+      </div>
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-purple)"></div> BART Outcome Model</div>
+        <div class="mm-leaf"><strong>Target:</strong> GoalDiff (continuous)</div>
+        <div class="mm-leaf"><strong>Base — General Stats</strong><br>Goal Creation · Game Control · Discipline (weighted sub-groups)</div>
+        <div class="mm-leaf"><strong>Base — H2H</strong><br>Head-to-head record, K-sampled reliability</div>
+        <div class="mm-leaf"><strong>Base — Player</strong> (planned Step 3)<br>Rolling player stats, absence penalty, positional weights</div>
+        <div class="mm-leaf"><strong>Context:</strong> Weather (direct input, no base)</div>
+        <div class="mm-leaf"><strong>Runs:</strong> 200 × Monte Carlo weight sampling</div>
+      </div>
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-orange)"></div> Surrogate System</div>
+        <div class="mm-leaf"><strong>surrogate_run_history.csv</strong> — stores results of past runs</div>
+        <div class="mm-leaf">Filtered by MatchStatsMode (no mixing actual / predicted)</div>
+        <div class="mm-leaf">Pareto front: accuracy vs. calibration trade-off</div>
+        <div class="mm-leaf">Best runs reused in future mode</div>
+      </div>
+
+      <div class="mm-branch">
+        <div class="mm-branch-label"><div class="dot" style="background:var(--accent-red)"></div> Modes</div>
+        <div class="mm-leaf"><strong>PREDICTION_MODE</strong>: future | reference</div>
+        <div class="mm-leaf"><strong>MATCH_STATS_MODE</strong>: predicted | actual | off</div>
+        <div class="mm-leaf">future + predicted → honest real-world prediction</div>
+        <div class="mm-leaf">reference + actual → upper-bound evaluation</div>
+        <div class="mm-leaf">reference + predicted → end-to-end honest backtest</div>
+        <div class="mm-leaf" style="color:var(--accent-red)">future + actual → BLOCKED (not available pre-kickoff)</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ===================== FLOWCHART: BACKTESTING ===================== -->
+<div class="section">
+  <div class="section-header">
+    <span class="badge badge-flowchart">Flowchart ④</span>
+    <div class="section-title">Backtesting Process</div>
+    <div class="section-hint">Draw BOTTOM-LEFT</div>
+  </div>
+
+  <div class="cols2">
+    <div class="flowchart">
+
+      <div class="fc-node start">START — backtest_matchdays.py</div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Load Stammdaten + Match Stats</div>
+        <div class="fc-node-detail">Filter Season 2025 · played=True · has stats → build matchday index</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node decision">
+        <div class="fc-node-title">⬡ Loop: for each target matchday N</div>
+        <div class="fc-node-detail">--all / --matchdays / --random flags</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node sub">Skip if Datacollection backtest/MDN/ already has output (resumable)</div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Write fixtures → match_results_references.csv</div>
+        <div class="fc-node-detail">Columns: MatchID, HomeGoals, AwayGoals</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Set env vars</div>
+        <div class="fc-node-detail">
+          BACKTEST_DATE_CUTOFF = earliest match date of MD N<br>
+          MAX_RUNS_OVERRIDE = 50<br>
+          MATCH_STATS_MODE_OVERRIDE = predicted
+        </div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node model">
+        <div class="fc-node-title">Run AI_match_stats_prediction.py</div>
+        <div class="fc-node-detail">Training data: all matches with Date &lt; cutoff (no future leakage)</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Copy outputs → Datacollection backtest/MDN/</div>
+        <div class="fc-node-detail">prediction_weight_runs.csv · prediction_weight_run_summary.csv · pareto_front.csv · meta.txt</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node decision">
+        <div class="fc-node-title">⬡ More matchdays?</div>
+      </div>
+      <div style="height:6px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:6px"></div><div class="fc-arrowhead"></div></div>
+      <div class="fc-label-arrow">Yes → loop back &nbsp;&nbsp; No → continue</div>
+      <div style="height:6px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:6px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Aggregate all matchdays</div>
+        <div class="fc-node-detail">analyze_backtest_results.py — combine MDN summaries</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node output">
+        <div class="fc-node-title">Compare vs BWIN Odds</div>
+        <div class="fc-node-detail">
+          Model WinProb vs bookmaker implied prob (1/odds)<br>
+          Metrics: accuracy, calibration, Brier score, ROI<br>
+          Pareto front: best weight configs across all matchdays
+        </div>
+      </div>
+
+    </div>
+
+    <div>
+      <div class="section" style="padding:16px; margin-bottom:16px;">
+        <div style="font-size:0.85rem; font-weight:600; color:var(--accent-orange); margin-bottom:10px;">Backtesting Data Flow</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.8;">
+          Matchdays covered: MD02, MD04, MD05, MD08, MD18, MD24, MD31 …<br>
+          Each MD folder contains:<br>
+          &nbsp;&nbsp;• meta.txt (cutoff date, runs, mode)<br>
+          &nbsp;&nbsp;• prediction_weight_run_summary.csv<br>
+          &nbsp;&nbsp;• prediction_weight_runs.csv<br>
+          &nbsp;&nbsp;• pareto_front.csv
+        </div>
+      </div>
+      <div class="section" style="padding:16px;">
+        <div style="font-size:0.85rem; font-weight:600; color:var(--accent-red); margin-bottom:10px;">Key guarantee</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.6;">
+          The BACKTEST_DATE_CUTOFF ensures that when predicting MD N, the model has never seen any data from that matchday or later. This simulates exactly what a real-time prediction would look like.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===================== FLOWCHART: FUTURE PREDICTION ===================== -->
+<div class="section">
+  <div class="section-header">
+    <span class="badge badge-flowchart">Flowchart ⑤</span>
+    <div class="section-title">Future Prediction Mode</div>
+    <div class="section-hint">Draw BOTTOM-RIGHT</div>
+  </div>
+
+  <div class="cols2">
+    <div class="flowchart">
+
+      <div class="fc-node start">START — PREDICTION_MODE = 'future'</div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Identify upcoming fixtures</div>
+        <div class="fc-node-detail">Stammdaten: Gespielt = False, next unplayed matchday</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Load future weather forecast</div>
+        <div class="fc-node-detail">future_weather_data_78.csv matched by fixture date + stadium city</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Player availability filter <span class="tag tag-orange">Step 3 (planned)</span></div>
+        <div class="fc-node-detail">
+          • Load injuries_league_78.csv → remove injured/suspended<br>
+          • Weight remaining squad by historical start probability<br>
+          • Compute absence penalty for key players above min-appearances threshold
+        </div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node model">
+        <div class="fc-node-title">GBR Match Stats Prediction <span class="tag tag-green">predicted mode only</span></div>
+        <div class="fc-node-detail">
+          • Uses pre-match features only (no result, no in-game stats available)<br>
+          • Final model (not OOF) — trained on all historical data up to today<br>
+          • Produces predicted_match_stats.csv → Datacollection future/
+        </div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node model">
+        <div class="fc-node-title">BART Outcome Model</div>
+        <div class="fc-node-detail">
+          • Loads surrogate history from Datacollection reference/ (filtered by mode)<br>
+          • 200 runs with best weight configurations from Pareto front<br>
+          • Feature input: base strength + rolling form + H2H + predicted stats + weather
+        </div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Aggregate probabilities across 200 runs</div>
+        <div class="fc-node-detail">Mean WinProb / DrawProb / LoseProb per fixture</div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node output">
+        <div class="fc-node-title">Outputs — Datacollection future/</div>
+        <div class="fc-node-detail">
+          📄 future_candidate_ranking.csv — ranked by confidence<br>
+          📄 future_outcome_table.csv — all fixtures with probs<br>
+          📄 predicted_match_stats.csv<br>
+          📄 prediction_weight_run_summary.csv
+        </div>
+      </div>
+      <div style="height:10px; display:flex; flex-direction:column; align-items:center;"><div class="fc-arrow" style="height:10px"></div><div class="fc-arrowhead"></div></div>
+
+      <div class="fc-node process">
+        <div class="fc-node-title">Compare with BWIN live odds</div>
+        <div class="fc-node-detail">Identify value bets: model prob significantly higher than bookmaker implied prob</div>
+      </div>
+
+    </div>
+
+    <div>
+      <div class="section" style="padding:16px; margin-bottom:16px;">
+        <div style="font-size:0.85rem; font-weight:600; color:var(--accent-red); margin-bottom:10px;">Key difference vs. backtesting</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.7;">
+          In future mode, there are <em>no actual results</em> to validate against yet. The pipeline runs exactly as in backtest but outputs a ranked list of confident predictions for the next matchday. Validation happens retroactively once the games are played.
+        </div>
+      </div>
+      <div class="section" style="padding:16px;">
+        <div style="font-size:0.85rem; font-weight:600; color:var(--accent-purple); margin-bottom:10px;">Planned improvements (Step 2 + 3)</div>
+        <div style="font-size:0.78rem; color:var(--text-muted); line-height:1.8;">
+          <strong style="color:var(--text)">Step 2</strong> — Fix TeamID in GBR: remove HomeTeamID / AwayTeamID from match-stats model (currently treated as continuous, creates bad splits)<br><br>
+          <strong style="color:var(--text)">Step 2</strong> — Restructure to 3 bases: General Stats Base · H2H Base · Player Base → each produces one aggregated signal before BART<br><br>
+          <strong style="color:var(--text)">Step 3</strong> — Player pipeline: rolling per-player stats, absence penalty, positional weighting (GK/DEF/MID/FWD)
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center; color:var(--text-muted); font-size:0.75rem; padding:20px 0 8px;">
+  KI-Projekt — Sports Match Prediction System · Blueprint v1.0 · 2026-05-29
+</div>
+
+</body>
+</html>

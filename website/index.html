@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ORAKEL — Bundesliga match intelligence</title>
+  <meta name="description" content="An AI that calls the Bundesliga before a ball is kicked. Latest results and upcoming predictions." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B0B0C'/%3E%3Cpath d='M5 16c3-6 18-6 22 0-4 6-19 6-22 0Z' fill='none' stroke='%232BE08B' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%232BE08B'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ── Navigation ─────────────────────────────────────────────── -->
+  <header class="nav" id="nav">
+    <div class="nav__inner">
+      <a class="brand" href="#top" aria-label="ORAKEL home">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M3 16c4-7.5 22-7.5 26 0-4 7.5-22 7.5-26 0Z" fill="none" stroke="currentColor" stroke-width="2.2" />
+          <circle cx="16" cy="16" r="4.2" fill="currentColor" />
+        </svg>
+        <span class="brand__name">ORAKEL</span>
+      </a>
+      <nav class="nav__links">
+        <a href="#upcoming" data-nav-upcoming hidden>Upcoming</a>
+        <a href="#results">Results</a>
+        <a href="#predictions">Predictions</a>
+        <a href="#method">Method</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ── Hero ─────────────────────────────────────────────────── -->
+    <section class="hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="wrap">
+        <p class="eyebrow reveal" data-eyebrow></p>
+        <h1 class="hero__title reveal">You know what's<br />going to happen.</h1>
+        <p class="hero__sub reveal">
+          ORAKEL reads form, head-to-head history, squad availability and even
+          the matchday weather — then calls the Bundesliga before a ball is kicked.
+        </p>
+        <div class="stats reveal" id="stats" aria-label="Model performance"></div>
+      </div>
+    </section>
+
+    <!-- ── Upcoming fixtures (hidden until the data has unplayed games) ── -->
+    <section class="section section--alt" id="upcoming" hidden>
+      <div class="wrap">
+        <div class="section__head reveal">
+          <div>
+            <h2 class="section__title">Upcoming fixtures</h2>
+            <p class="section__caption" id="upcoming-caption"></p>
+          </div>
+        </div>
+        <div class="grid" id="upcoming-grid"></div>
+      </div>
+    </section>
+
+    <!-- ── Latest results ───────────────────────────────────────── -->
+    <section class="section" id="results">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <div>
+            <h2 class="section__title">Latest results</h2>
+            <p class="section__caption" id="results-caption"></p>
+          </div>
+          <div class="verdict-summary" id="verdict-summary"></div>
+        </div>
+        <div class="grid" id="results-grid"></div>
+      </div>
+    </section>
+
+    <!-- ── Predictions ──────────────────────────────────────────── -->
+    <section class="section section--alt" id="predictions">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <div>
+            <h2 class="section__title">The predictions</h2>
+            <p class="section__caption" id="predictions-caption"></p>
+          </div>
+        </div>
+        <div class="grid" id="predictions-grid"></div>
+      </div>
+    </section>
+
+    <!-- ── Method ───────────────────────────────────────────────── -->
+    <section class="section" id="method">
+      <div class="wrap">
+        <div class="section__head reveal">
+          <div>
+            <h2 class="section__title">How the call is made</h2>
+            <p class="section__caption">Three steps, every fixture — no guesswork.</p>
+          </div>
+        </div>
+        <div class="method reveal">
+          <article class="method__step">
+            <span class="method__num">01</span>
+            <h3>Read the signals</h3>
+            <p>Season form, head-to-head records, player form and absences, plus
+               stadium weather — 34 weighted inputs per fixture.</p>
+          </article>
+          <article class="method__step">
+            <span class="method__num">02</span>
+            <h3>Simulate the match</h3>
+            <p>A gradient-boosted model projects each team's match stats, then
+               turns expected goals into win, draw and loss probabilities.</p>
+          </article>
+          <article class="method__step">
+            <span class="method__num">03</span>
+            <h3>Rank the call</h3>
+            <p>Hundreds of weight configurations are scored against real results;
+               the balanced best becomes the published prediction.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── Footer ─────────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="brand brand--footer">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M3 16c4-7.5 22-7.5 26 0-4 7.5-22 7.5-26 0Z" fill="none" stroke="currentColor" stroke-width="2.2" />
+          <circle cx="16" cy="16" r="4.2" fill="currentColor" />
+        </svg>
+        <span class="brand__name">ORAKEL</span>
+      </div>
+      <p class="footer__note" id="footer-note"></p>
+      <p class="footer__fine">For research and entertainment. Not betting advice.</p>
+    </div>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

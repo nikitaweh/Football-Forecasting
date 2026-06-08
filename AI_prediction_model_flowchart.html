@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Match-Stats Prediction — Model Flow Chart</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --ink: #1a202c;
+    --muted: #5a6577;
+    --line: #e2e8f0;
+    --model: #2b6cb0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 40px 24px 80px;
+  }
+  .topnav {
+    max-width: 1100px;
+    margin: 0 auto 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .topnav .brand { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+  .topnav .links a {
+    text-decoration: none;
+    color: var(--muted);
+    font-size: 14px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    margin-left: 6px;
+  }
+  .topnav .links a:hover { background: #eef2f7; color: var(--ink); }
+  .topnav .links a.active { background: var(--model); color: #fff; }
+  header {
+    max-width: 1100px;
+    margin: 0 auto 28px;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 15px;
+    margin: 0;
+  }
+  .legend {
+    max-width: 1100px;
+    margin: 0 auto 28px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .legend-card {
+    flex: 1 1 300px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .legend-card h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot {
+    width: 12px; height: 12px; border-radius: 3px; display: inline-block;
+  }
+  .dot.model { background: var(--model); }
+  .legend-card p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  .diagram-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 24px;
+    overflow-x: auto;
+  }
+  .mermaid { display: flex; justify-content: center; }
+  .notes {
+    max-width: 1100px;
+    margin: 28px auto 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .note-card {
+    flex: 1 1 380px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 20px;
+  }
+  .note-card h3 { margin: 0 0 8px; font-size: 15px; }
+  .note-card ul { margin: 0; padding-left: 18px; }
+  .note-card li { font-size: 13.5px; color: var(--muted); line-height: 1.55; margin-bottom: 6px; }
+  .note-card.data { border-left: 4px solid var(--model); }
+  .note-card.warn { border-left: 4px solid #d69e2e; background: #fffdf7; }
+  footer {
+    max-width: 1100px;
+    margin: 24px auto 0;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <nav class="topnav">
+    <span class="brand">ORAKEL · Model Blueprint</span>
+    <div class="links">
+      <a href="AI_prediction_model_flowchart.html" class="active">Flow Chart</a>
+      <a href="AI_models_detail.html">Model Deep-Dive</a>
+    </div>
+  </nav>
+  <header>
+    <h1>AI Match-Stats Prediction — Model Flow Chart</h1>
+    <p class="subtitle">How <code>AI_match_stats_prediction.py</code> turns raw football data into Win / Draw / Loss probabilities. The three machine-learning models are shown as dark blue boxes.</p>
+  </header>
+
+  <div class="legend">
+    <div class="legend-card">
+      <h3><span class="dot model"></span>GBR — Match-Stats Predictor</h3>
+      <p>Gradient Boosting. Trains <em>one separate regressor per match-stat</em> (xG, shots, possession…) from pre-match data, using 5-fold out-of-fold predictions for training rows. Falls back to the median if a stat has fewer than 25 usable rows or no variance. Used so future games — which have no stats yet — still get a "General" signal.</p>
+    </div>
+    <div class="legend-card">
+      <h3><span class="dot model"></span>Surrogate — Weight Picker</h3>
+      <p>A meta-model (GBR or Neural Net). Learns from past runs which <em>weight settings</em> score well, so the search skips bad combinations instead of guessing randomly. Activates only after 100 <em>valid</em> history rows survive filtering (same stats-mode, source-mode, schema, and non-empty scores). History is always read from the reference folder.</p>
+    </div>
+    <div class="legend-card">
+      <h3><span class="dot model"></span>BART — Outcome Model</h3>
+      <p>Bayesian Additive Regression Trees (200 trees). The real predictor — but it estimates only the <em>goal difference</em>. The Win / Draw / Loss probabilities are produced <em>afterwards</em> by a normal-curve approximation (using the training residual spread and a ±0.5-goal "draw zone"), not by BART directly.</p>
+    </div>
+  </div>
+
+  <div class="diagram-wrap">
+    <pre class="mermaid">
+flowchart TD
+
+    subgraph P0["1 · Configuration &amp; Switches"]
+        C1["Choose mode:<br/>predict future games<br/>OR re-test past games"]
+        C2["Choose match-stats handling:<br/>use real / predict them / ignore"]
+        C5["Load settings:<br/>signal blend weights,<br/>H2H smoothing range,<br/>player-score rules"]
+        C1 --> C5
+        C2 --> C5
+    end
+
+    subgraph P1["2 · Load &amp; Combine Raw Data"]
+        L1["Read match stats,<br/>fixture list, team info"]
+        L3["Merge starting from fixtures<br/>so unplayed games are kept"]
+        L5["Attach weather<br/>(historical + forecast)"]
+        L6["Split into<br/>played vs unplayed games"]
+        L1 --> L3 --> L5 --> L6
+    end
+
+    subgraph P2["3 · Build Pre-Match Features (4 data groups)"]
+        F1["TEAM FORM<br/>last-5 rolling + season strength<br/><i>feeds stat-prediction &amp; scoreline —<br/>NOT a direct BART input</i>"]
+        F2["HEAD-TO-HEAD<br/>past meetings only,<br/>overall + at this venue"]
+        F3["PLAYER STRENGTH<br/>from line-ups, injuries &amp;<br/>player-stats files →<br/>scores, line-up, injury penalty"]
+        FW["WEATHER<br/>temp, wind, rain, etc."]
+        F1 --> F2 --> F3 --> FW
+    end
+
+    subgraph PB["4 · Reuse Old Forecasts? (re-test mode only)"]
+        B1["Update old saved runs to current format<br/>(legacy → hybrid weight layout)"]
+        B2{"Re-test mode AND saved future<br/>forecasts exist for these matches?"}
+        BG{"Already graded in<br/>an earlier run?"}
+        B3["Grade each saved forecast vs the real result:<br/>• ProbActual = prob it gave the true outcome<br/>• MatchNLL = -log(ProbActual)<br/>• AvgNLL + Accuracy per run"]
+        B4["Save: graded predictions, run summary,<br/>future-vs-reference calibration log,<br/>append to surrogate history, best-settings list"]
+        B5(["STOP — skip the normal pipeline"])
+        B1 --> B2
+        B2 -->|yes| BG
+        BG -->|new| B3 --> B4 --> B5
+    end
+
+    subgraph P3["5 · Pick Games &amp; Training Set"]
+        S1["Select games to predict<br/>(next 9, or the test set)"]
+        S2["Training set = played games<br/>minus the test games"]
+        S3["Target = home goals − away goals"]
+        S1 --> S2 --> S3
+    end
+
+    subgraph P4["6 · Fill In Match Statistics"]
+        M0{"How to handle<br/>match stats?"}
+        MA["Use the real stats"]
+        MOFF["Ignore them"]
+        MP["Predict them from<br/>pre-match signals"]
+        GBR[["GBR MODEL<br/>one regressor per stat<br/>(xG, shots, possession…)<br/>5-fold out-of-fold on train;<br/>median fallback if &lt;25 rows"]]
+        MPP["Tidy up:<br/>round counts,<br/>balance possession to 100%"]
+        M0 -->|real| MA
+        M0 -->|ignore| MOFF
+        M0 -->|predict| MP --> GBR --> MPP
+    end
+
+    subgraph P5["7 · Choose Which Weight Settings to Try"]
+        W3["Load run history<br/>(always from the reference folder)"]
+        W4{"At least 100 VALID rows?<br/>(after filtering by mode,<br/>schema &amp; non-empty scores)"}
+        SUR[["SURROGATE MODEL<br/>learns weights → score,<br/>ranks 300 candidates"]]
+        W5["Keep the promising ones<br/>+ a few random ones"]
+        W6["Just generate<br/>random weight settings"]
+        W3 --> W4
+        W4 -->|yes| SUR --> W5
+        W4 -->|no| W6
+    end
+
+    subgraph P6["8 · Run the Predictions (loop per weight setting)"]
+        R2["8.1 · Apply this run's weight setting<br/>• per-feature dials = relative importance<br/>• base multipliers = whole-group volume<br/>+ H2H smoothing: value × count / (count + k)<br/>rare meetings shrink toward 0 · k searched 1 to 10"]
+        R3["8.2 · Fill missing values<br/>(median imputation)"]
+        R4["8.3 · Collapse features into BART columns<br/>(all framed as home minus away):<br/>• General signal (see 8.3 detail)<br/>• H2H &amp; Player signals = weighted avg × multiplier<br/>• 7 weather variables kept separate<br/>= 10 columns total"]
+        BART[["8.4 · BART MODEL<br/>predicts goal difference ONLY<br/>(200 trees)"]]
+        R6["8.5 · Turn goal difference into<br/>Win / Draw / Loss %<br/>via normal approximation<br/>(residual spread, draw zone ±0.5)"]
+        R7["8.6 · Estimate the scoreline<br/>(e.g. 2–1)"]
+        R9["8.7 · If results known:<br/>score AvgNLL (log-loss)<br/>&amp; Accuracy"]
+        R10["8.8 · Record confidence<br/>of this run"]
+        R2 --> R3 --> R4 --> BART --> R6 --> R7 --> R9 --> R10
+        R10 -.repeat for next setting.-> R2
+    end
+
+    subgraph P7["9 · Rank, Choose &amp; Save"]
+        O1["Save every run's<br/>predictions"]
+        O3["Add results to history<br/>(future runs feed the Surrogate<br/>only after being scored<br/>against real results)"]
+        O4{"Which mode?"}
+        O5["Past-game test →<br/>best/Pareto settings list"]
+        O6["Future →<br/>Balanced / Safe / Bold pick<br/>+ final forecast table"]
+        O1 --> O3 --> O4
+        O4 -->|test| O5
+        O4 -->|future| O6
+    end
+
+    P0 --> P1 --> P2 --> PB
+    B2 -->|no| P3
+    BG -->|"already done"| P3
+    P3 --> P4
+    MA --> P5
+    MOFF --> P5
+    MPP --> P5
+    P5 --> P6 --> P7
+
+    subgraph GEN["8.3 detail — building the General signal"]
+        G1["1) each stat becomes home minus away<br/>(bad stats inverted: fewer fouls/cards = plus)"]
+        G2["2) weighted average within each subgroup:<br/>GoalCreation · GameControl · DisciplineSetPiece"]
+        G3["3) blend 55% / 30% / 15%,<br/>then multiply by the General base multiplier<br/>= General_BaseSignal"]
+        G1 --> G2 --> G3
+    end
+    R4 -.->|how the General signal is made| GEN
+
+    classDef model fill:#2b6cb0,stroke:#1a365d,stroke-width:3px,color:#ffffff,font-weight:bold;
+    class GBR,SUR,BART model;
+
+    classDef stopnode fill:#fed7d7,stroke:#c53030,color:#742a2a;
+    class B5 stopnode;
+    </pre>
+  </div>
+
+  <section class="notes">
+    <div class="note-card data">
+      <h3>Raw data inputs</h3>
+      <ul>
+        <li><strong>Core:</strong> match_statistics_filtered_78.csv, Stammdaten_78.csv (fixtures), Teams_78.csv</li>
+        <li><strong>Player:</strong> lineups_league_78.csv, injuries_league_78.csv, player_statistics_per_fixture_league_78.csv</li>
+        <li><strong>Weather:</strong> historical_weather_data_78.csv, future_weather_data_78.csv</li>
+      </ul>
+    </div>
+    <div class="note-card warn">
+      <h3>Caveats worth noting in the paper</h3>
+      <ul>
+        <li><strong>Re-test mode uses real in-match stats by default.</strong> When re-testing past games the code defaults to the actual statistics, so it is a diagnostic check, <em>not</em> a pure "pre-match only" backtest.</li>
+        <li><strong>BART trains on 80% of the data.</strong> An 80/20 split is created, but the 20% validation slice is never used afterward — so BART only ever sees the 80% training portion. Flag this if it was unintended.</li>
+        <li><strong>Possible information leak in season strength.</strong> Each team's season-long average strength is computed from <em>all</em> played games before the test games are removed, so a past game's own result can slightly influence its own prediction inputs.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    Tip: use your browser's <strong>Print → Save as PDF</strong> to drop this straight into your paper. The dark-blue boxes are the three models you document separately.
+  </footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      fontFamily: "Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+      fontSize: "14px",
+      primaryColor: "#eef2f7",
+      primaryBorderColor: "#b4c2d6",
+      primaryTextColor: "#1a202c",
+      lineColor: "#7a8aa0",
+      clusterBkg: "#fbfcfe",
+      clusterBorder: "#d6deea"
+    },
+    flowchart: { nodeSpacing: 45, rankSpacing: 55, curve: "basis", useMaxWidth: true }
+  });
+</script>
+</body>
+</html>

@@ -24,6 +24,20 @@ MAX_RUNS = 200
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
 
+# Env override for MAX_RUNS — used by the backtest harness to cap runs per
+# matchday without touching this file.
+_max_runs_override = os.environ.get('MAX_RUNS_OVERRIDE', '').strip()
+if _max_runs_override:
+    MAX_RUNS = int(_max_runs_override)
+
+# === BACKTEST DATE CUTOFF ===
+# When set, training data is filtered to exclude all matches with MatchDate >=
+# cutoff. Used by the matchday-backtest harness to guarantee no future leakage
+# when predicting a historical matchday. Configurable via env var so the driver
+# script can pass it per-matchday without editing this file.
+_backtest_cutoff_raw = os.environ.get('BACKTEST_DATE_CUTOFF', '').strip()
+BACKTEST_DATE_CUTOFF = pd.to_datetime(_backtest_cutoff_raw) if _backtest_cutoff_raw else None
+
 # === PREDICTION TARGET SWITCH ===
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
@@ -35,6 +49,11 @@ REFERENCE_PREDICTION_LIMIT = None
 # "predicted" = predict current-match stats from pre-match data only
 # "off"       = remove match stats from the outcome model
 MATCH_STATS_MODE = 'predicted' if PREDICTION_MODE == 'future' else 'actual'
+# Env override — the backtest harness forces 'predicted' so it doesn't leak
+# post-match stats into the outcome model when scoring a past matchday.
+_match_stats_mode_override = os.environ.get('MATCH_STATS_MODE_OVERRIDE', '').strip()
+if _match_stats_mode_override:
+    MATCH_STATS_MODE = _match_stats_mode_override
 MATCH_STATS_MODEL = 'gbr'
 MATCH_STATS_CV_SPLITS = 5
 MATCH_STATS_MIN_ROWS = 25
@@ -1176,11 +1195,19 @@ def append_future_vs_reference_metrics(metrics_path, summary_df):
     if 'Ranking_Accuracy' in snapshot.columns:
         snapshot['EvalRank_Accuracy'] = pd.to_numeric(snapshot['Ranking_Accuracy'], errors='coerce').rank(method='min', ascending=False)
     if {'EvalRank_AvgNLL', 'EvalRank_Accuracy'}.issubset(snapshot.columns):
-        a = snapshot['EvalRank_AvgNLL'].fillna(snapshot['EvalRank_AvgNLL'].max(skipna=True) + 1)
-        b = snapshot['EvalRank_Accuracy'].fillna(snapshot['EvalRank_Accuracy'].max(skipna=True) + 1)
-        snapshot['EvalRank_Combined'] = a + b
-        best = snapshot['EvalRank_Combined'].min(skipna=True)
-        snapshot['EvalIsBestCombined'] = snapshot['EvalRank_Combined'] == best
+        nll_max = snapshot['EvalRank_AvgNLL'].max(skipna=True)
+        acc_max = snapshot['EvalRank_Accuracy'].max(skipna=True)
+        if pd.isna(nll_max) or pd.isna(acc_max):
+            # No usable ranks in at least one column: fillna(max+1) would be a
+            # no-op, so combined ranking is undefined rather than fabricated.
+            snapshot['EvalRank_Combined'] = float('nan')
+            snapshot['EvalIsBestCombined'] = False
+        else:
+            a = snapshot['EvalRank_AvgNLL'].fillna(nll_max + 1)
+            b = snapshot['EvalRank_Accuracy'].fillna(acc_max + 1)
+            snapshot['EvalRank_Combined'] = a + b
+            best = snapshot['EvalRank_Combined'].min(skipna=True)
+            snapshot['EvalIsBestCombined'] = snapshot['EvalRank_Combined'] == best
 
     existing = read_optional_csv(metrics_path)
     if existing.empty:
@@ -1209,6 +1236,7 @@ def append_future_vs_reference_metrics(metrics_path, summary_df):
 
     updated.to_csv(metrics_path, index=False)
     return updated
+
 def try_backfill_reference_from_future(ref_results):
     if ref_results is None or ref_results.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -1233,22 +1261,26 @@ def try_backfill_reference_from_future(ref_results):
             and 'RunID' in existing_pred.columns and 'MatchID' in existing_pred.columns):
         existing_backfill = existing_pred[existing_pred['PredictionSource'] == 'future_backfill']
         if not existing_backfill.empty:
-            existing_run_ids = pd.to_numeric(existing_backfill['RunID'], errors='coerce')
-            existing_match_ids = pd.to_numeric(existing_backfill['MatchID'], errors='coerce')
-            existing_valid = existing_run_ids.notna() & existing_match_ids.notna()
-            existing_pairs = set(zip(
-                existing_run_ids[existing_valid].astype(int).tolist(),
-                existing_match_ids[existing_valid].astype(int).tolist()
-            ))
-            new_run_ids = pd.to_numeric(matched_rows['RunID'], errors='coerce')
-            new_match_ids = pd.to_numeric(matched_rows['MatchID'], errors='coerce')
-            new_valid = new_run_ids.notna() & new_match_ids.notna()
-            expected_pairs = set(zip(
-                new_run_ids[new_valid].astype(int).tolist(),
-                new_match_ids[new_valid].astype(int).tolist()
-            ))
-            if expected_pairs and expected_pairs.issubset(existing_pairs):
-                return pd.DataFrame(), pd.DataFrame()
+            # RunIDs reset to 1 within each batch, so RunID alone is ambiguous —
+            # the same (RunID, MatchID) can mean two different runs across batches.
+            # The comparison key uses every identity column present in both files.
+            int_cols = ['BatchID', 'RunID', 'MatchID']
+            str_cols = ['FeatureSchemaVersion', 'MatchStatsMode']
+            key_cols = [c for c in int_cols + str_cols
+                        if c in matched_rows.columns and c in existing_backfill.columns]
+            if 'RunID' in key_cols and 'MatchID' in key_cols:
+                def _key_set(df):
+                    norm = pd.DataFrame(index=df.index)
+                    for c in key_cols:
+                        if c in int_cols:
+                            norm[c] = pd.to_numeric(df[c], errors='coerce').astype('Int64').astype(str)
+                        else:
+                            norm[c] = df[c].astype(str).fillna('')
+                    return set(map(tuple, norm.itertuples(index=False, name=None)))
+                existing_pairs = _key_set(existing_backfill)
+                expected_pairs = _key_set(matched_rows)
+                if expected_pairs and expected_pairs.issubset(existing_pairs):
+                    return pd.DataFrame(), pd.DataFrame()
 
     if 'MatchStatsMode' not in matched_rows.columns:
         matched_rows['MatchStatsMode'] = 'predicted'
@@ -2335,6 +2367,10 @@ train_df = df[df['Played'] == True].copy()
 if PREDICTION_MODE == 'reference':
     train_df = train_df[~train_df['MatchID'].isin(predict_df['MatchID'])].copy()
     print(f"Training matches after excluding reference targets: {len(train_df)}")
+if BACKTEST_DATE_CUTOFF is not None:
+    before = len(train_df)
+    train_df = train_df[pd.to_datetime(train_df['MatchDate'], errors='coerce') < BACKTEST_DATE_CUTOFF].copy()
+    print(f"Backtest date cutoff {BACKTEST_DATE_CUTOFF.date()}: training matches reduced from {before} to {len(train_df)}.")
 
 train_df, predict_df, signal_input_features, predicted_match_stats_df, match_stats_summary_df = apply_match_stats_mode(
     train_df,
@@ -2434,12 +2470,16 @@ else:
     else:
         selected_df = generate_candidate_df(run_limit, weight_parameter_names, H2H_K_RANGE)
 
+    # BatchID must be globally unique within the folder, not mode-relative.
+    # history_df is already filtered by mode/source/schema, so its max would
+    # collide with batches from other modes. Read the unfiltered file instead.
     batch_id = 1
-    if not history_df.empty and 'BatchID' in history_df.columns:
-        try:
-            batch_id = int(history_df['BatchID'].max()) + 1
-        except Exception:
-            batch_id = 1
+    for raw_history_path in (RUN_HISTORY_SOURCE_PATH, RUN_HISTORY_PATH):
+        raw_history = read_optional_csv(raw_history_path)
+        if not raw_history.empty and 'BatchID' in raw_history.columns:
+            max_batch = pd.to_numeric(raw_history['BatchID'], errors='coerce').max()
+            if pd.notna(max_batch):
+                batch_id = max(batch_id, int(max_batch) + 1)
 
     for idx, cand in selected_df.iterrows():
         run_id = idx + 1
@@ -2479,7 +2519,7 @@ else:
         X_pred_w = build_outcome_design_matrix(X_pred_imp, weights, MATCH_STATS_MODE)
 
         # Use a single worker to avoid multiprocessing pipe permission issues on restricted hosts.
-        model = SklearnModel(n_trees=50, n_jobs=1)
+        model = SklearnModel(n_trees=200, n_jobs=1)
         model.fit(X_train_w.values, y_train.values)
 
         train_preds = model.predict(X_train_w.values)
