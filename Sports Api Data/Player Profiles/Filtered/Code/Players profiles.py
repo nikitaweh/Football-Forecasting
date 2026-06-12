@@ -1,3 +1,4 @@
+import glob
 import json
 import csv
 import os
@@ -9,7 +10,8 @@ from apscheduler.triggers.cron import CronTrigger
 # Pfade anpassen
 # ---------------------------
 BASE_DIR        = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
-PROFILES_FILE   = os.path.join(BASE_DIR, "players_profiles_78.json")
+# Alle Profil-Dateien (Bundesliga + internationale Wettbewerbe)
+PROFILES_PATTERN = os.path.join(BASE_DIR, "players_profiles*.json")
 SEASONS_FILE    = os.path.join(BASE_DIR, "players_activity_78.json")
 TRANSFERS_FILE  = os.path.join(BASE_DIR, "transferhistory_78.json")
 OUTPUT_CSV_FILE = os.path.join(r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Filtered/Datacollection","player_information_78.csv")
@@ -18,10 +20,24 @@ OUTPUT_CSV_FILE = os.path.join(r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player
 # Funktion zur Erstellung der CSV
 # ---------------------------
 def convert_player_information_csv():
-    # 1) JSONs laden
+    # 1) JSONs laden (alle Profil-Dateien zusammenfuehren, Duplikate per player_id entfernen)
     try:
-        with open(PROFILES_FILE, 'r', encoding='utf-8') as f:
-            profiles_data = json.load(f)
+        merged_players = []
+        seen_ids = set()
+        profile_files = sorted(glob.glob(PROFILES_PATTERN))
+        if not profile_files:
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Keine Profil-Dateien gefunden ({PROFILES_PATTERN})")
+            return
+        for path in profile_files:
+            with open(path, 'r', encoding='utf-8') as f:
+                file_data = json.load(f)
+            for p in file_data.get('players', []):
+                pid = p.get('player_id')
+                if pid is None or pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+                merged_players.append(p)
+        profiles_data = {'players': merged_players}
         with open(SEASONS_FILE, 'r', encoding='utf-8') as f:
             seasons_data = json.load(f)
         with open(TRANSFERS_FILE, 'r', encoding='utf-8') as f:
