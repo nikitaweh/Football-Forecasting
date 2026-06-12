@@ -80,9 +80,13 @@
 
   function renderHero() {
     var m = DATA.meta;
+    var mdLabel = m.matchdayLabel || ("Matchday " + m.matchday);
 
-    $("#topbar-md").textContent = "Matchday " + m.matchday;
-    $("[data-eyebrow]").textContent = m.league + " · Matchday " + m.matchday;
+    document.title = "ORAKEL — " + m.league + " · mobile";
+    $("#topbar-md").textContent = mdLabel;
+    $("[data-eyebrow]").textContent = m.league + " · " + mdLabel;
+    var signals = $("[data-signals]");
+    if (signals) signals.textContent = m.signalsPerMatch;
 
     var played = DATA.matches.filter(function (x) { return x.result && x.result.outcome; });
     var correct = played.filter(function (x) {
@@ -103,7 +107,7 @@
 
     var stats = [
       { value: DATA.matches.length, label: "Matches called",
-        sub: "Matchday " + m.matchday + " fixtures" },
+        sub: mdLabel + " fixtures" },
       { value: rate, unit: "%", label: "Outcome hit rate",
         sub: correct + " of " + played.length + " correct" },
       { value: topConf, unit: "%", label: "Top-call confidence", sub: topSub },
@@ -124,7 +128,7 @@
     });
 
     $("#results-caption").textContent =
-      "Matchday " + m.matchday + " · " + fmtDate(m.matchdayDate);
+      mdLabel + " · " + fmtDate(m.matchdayDate);
     $("#predictions-caption").textContent =
       "Every call ORAKEL published — before a ball was kicked.";
     $("#footer-note").textContent =
