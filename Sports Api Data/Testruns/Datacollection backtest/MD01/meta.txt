@@ -1,0 +1,4 @@
+Matchday: 1
+Cutoff: 2025-08-22
+Fixtures: 9
+Outputs copied: 4

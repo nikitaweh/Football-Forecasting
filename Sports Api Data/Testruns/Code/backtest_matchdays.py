@@ -44,6 +44,7 @@ OUTPUT_FILES = [
     'prediction_weight_runs.csv',
     'prediction_weight_run_summary.csv',
     'pareto_front.csv',
+    'future_outcome_table_ensemble.csv',
 ]
 
 # Defaults the driver passes to the pipeline. MAX_RUNS=50 keeps each matchday

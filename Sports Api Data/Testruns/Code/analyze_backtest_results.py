@@ -159,6 +159,7 @@ def main():
     for md_dir in md_dirs:
         summary_path = md_dir / 'prediction_weight_run_summary.csv'
         runs_path = md_dir / 'prediction_weight_runs.csv'
+        ensemble_path = md_dir / 'future_outcome_table_ensemble.csv'
         if not summary_path.exists():
             print(f'  {md_dir.name}: no summary file, skipping.')
             continue
@@ -175,6 +176,7 @@ def main():
         md_matches = matches_df[matches_df['MD'] == md_num]
         match_ids = md_matches['MatchID'].tolist()
         results = md_matches['Result'].tolist()
+        result_by_match = dict(zip(md_matches['MatchID'].astype(int), md_matches['Result']))
         bookie_baseline, n_with_odds, n_fallback = matchday_bookie_baseline(
             match_ids, results, bookie_nll_map
         )
@@ -208,6 +210,59 @@ def main():
                     matches_total = int(len(cmp))
                     per_match_comparison_frames.append(cmp)
 
+        # Top-K ensemble metrics: read the ensemble outcome table and score it
+        # against actuals the same way the single-pick NLL is computed.
+        ensemble_nll = ensemble_acc = float('nan')
+        ensemble_size = None
+        ensemble_matches_beat_bookie = ensemble_matches_compared = None
+        if ensemble_path.exists():
+            try:
+                ensemble_df = pd.read_csv(ensemble_path)
+            except pd.errors.EmptyDataError:
+                ensemble_df = pd.DataFrame()
+            needed = {'MatchID', 'WinProb', 'DrawProb', 'LoseProb'}
+            if not ensemble_df.empty and needed.issubset(ensemble_df.columns):
+                ensemble_df['MatchID'] = pd.to_numeric(ensemble_df['MatchID'], errors='coerce').astype('Int64')
+                ensemble_df['ActualResult'] = ensemble_df['MatchID'].map(result_by_match)
+                # Per-match NLL using ensemble probabilities.
+                def _ens_nll(row):
+                    r = row.get('ActualResult')
+                    if r == 'H': p = row.get('WinProb')
+                    elif r == 'D': p = row.get('DrawProb')
+                    elif r == 'A': p = row.get('LoseProb')
+                    else: return float('nan')
+                    try:
+                        return -math.log(max(float(p), 1e-12))
+                    except (TypeError, ValueError):
+                        return float('nan')
+                ensemble_df['MatchNLL'] = ensemble_df.apply(_ens_nll, axis=1)
+                if 'PredictedResult' in ensemble_df.columns:
+                    correct = (ensemble_df['PredictedResult'] == ensemble_df['ActualResult']) & ensemble_df['ActualResult'].notna()
+                    scored = ensemble_df.loc[ensemble_df['ActualResult'].notna()]
+                    if not scored.empty:
+                        ensemble_acc = float(correct.loc[scored.index].mean())
+                valid_nll = ensemble_df['MatchNLL'].dropna()
+                if not valid_nll.empty:
+                    ensemble_nll = float(valid_nll.mean())
+                if 'EnsembleSize' in ensemble_df.columns and ensemble_df['EnsembleSize'].notna().any():
+                    ensemble_size = int(ensemble_df['EnsembleSize'].iloc[0])
+                # Per-match comparison vs bookie for the ensemble.
+                ensemble_df['MatchNLL_Bookie'] = ensemble_df['MatchID'].map(
+                    {int(k): v for k, v in bookie_nll_map.items()}
+                )
+                ens_cmp = ensemble_df.dropna(subset=['MatchNLL', 'MatchNLL_Bookie'])
+                if not ens_cmp.empty:
+                    ensemble_matches_beat_bookie = int((ens_cmp['MatchNLL'] < ens_cmp['MatchNLL_Bookie']).sum())
+                    ensemble_matches_compared = int(len(ens_cmp))
+        ensemble_gap_vs_bookie = (
+            ensemble_nll - bookie_baseline
+            if pd.notna(ensemble_nll) and pd.notna(bookie_baseline) else float('nan')
+        )
+        ensemble_beats_bookie = (
+            ensemble_nll < bookie_baseline
+            if pd.notna(ensemble_nll) and pd.notna(bookie_baseline) else None
+        )
+
         summary_rows.append({
             'Matchday': md_num,
             'NumFixtures': len(results),
@@ -222,6 +277,13 @@ def main():
             'BeatsBookie': beats_bookie,
             'MatchesBeatingBookie': matches_beat,
             'MatchesCompared': matches_total,
+            'EnsembleSize': ensemble_size,
+            'EnsembleNLL': ensemble_nll,
+            'EnsembleAcc': ensemble_acc,
+            'EnsembleGapVsBookie': ensemble_gap_vs_bookie,
+            'EnsembleBeatsBookie': ensemble_beats_bookie,
+            'EnsembleMatchesBeatingBookie': ensemble_matches_beat_bookie,
+            'EnsembleMatchesCompared': ensemble_matches_compared,
             'NumRuns': len(summary),
         })
 
@@ -283,6 +345,29 @@ def main():
         print(f"  Mean bookie NLL: {all_cmp['MatchNLL_Bookie'].mean():.4f}")
         print(f"  Mean per-match gap (model - bookie): {diff.mean():+.4f}")
         print(f"  Median per-match gap:                {diff.median():+.4f}")
+
+    # Top-K ensemble vs single-pick comparison.
+    if season['EnsembleNLL'].notna().any():
+        ens_cols = ['Matchday', 'EnsembleSize', 'BestNLL', 'EnsembleNLL',
+                    'EnsembleGapVsBookie', 'EnsembleAcc',
+                    'EnsembleMatchesBeatingBookie', 'EnsembleMatchesCompared',
+                    'EnsembleBeatsBookie']
+        ens_display = season[ens_cols].copy()
+        for c in ['BestNLL', 'EnsembleNLL', 'EnsembleGapVsBookie', 'EnsembleAcc']:
+            ens_display[c] = ens_display[c].apply(fmt)
+        print('\n=== Top-K ensemble vs single-pick (per matchday) ===')
+        print(ens_display.to_string(index=False))
+
+        valid_pairs = season.dropna(subset=['BestNLL', 'EnsembleNLL'])
+        if not valid_pairs.empty:
+            ens_wins = int((valid_pairs['EnsembleNLL'] < valid_pairs['BestNLL']).sum())
+            mean_top1 = valid_pairs['BestNLL'].mean()
+            mean_ens = valid_pairs['EnsembleNLL'].mean()
+            print(f"\n  Matchdays where ensemble beats single-pick: {ens_wins} / {len(valid_pairs)}")
+            print(f"  Mean single-pick NLL: {mean_top1:.4f}")
+            print(f"  Mean ensemble NLL:    {mean_ens:.4f}")
+            print(f"  Mean difference (ensemble - single-pick): {mean_ens - mean_top1:+.4f}  (negative = ensemble better)")
+            print(f"  Mean ensemble gap vs bookie: {valid_pairs['EnsembleGapVsBookie'].mean():+.4f}")
 
     if len(season) >= 5:
         decile_size = max(1, len(season) // 10)

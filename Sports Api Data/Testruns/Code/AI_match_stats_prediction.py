@@ -84,6 +84,7 @@ RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.
 RUN_HISTORY_PATH = os.path.join(OUTPUT_PATH, 'surrogate_run_history.csv')
 PARETO_OUT_PATH = DECISION_OUT_PATH
 FUTURE_OUTCOME_TABLE_PATH = os.path.join(OUTPUT_PATH, 'future_outcome_table.csv')
+FUTURE_OUTCOME_TABLE_ENSEMBLE_PATH = os.path.join(OUTPUT_PATH, 'future_outcome_table_ensemble.csv')
 WEATHER_FUTURE_PATH = os.path.join(DATA_PATH, 'future_weather_data_78.csv')
 PREDICTED_MATCH_STATS_OUT_PATH = os.path.join(OUTPUT_PATH, 'predicted_match_stats.csv')
 FUTURE_PREDICTION_SOURCE_PATH = os.path.join(FUTURE_OUTPUT_PATH, 'prediction_weight_runs.csv')
@@ -98,6 +99,19 @@ SURROGATE_MIN_HISTORY = 100
 SURROGATE_CANDIDATES = 300
 SURROGATE_RANDOM_FRACTION = 0.2
 PARETO_TARGET_SIZE = 20
+
+# Top-K ensemble for the future-mode outcome table. DISABLED by default: the
+# 8-matchday backtest (2026-06) showed the ensemble lost to single-pick on every
+# matchday (mean NLL +0.052 worse), because averaging top-K dilutes the best
+# candidate without adding robustness. The single-pick path (future_outcome_table.csv)
+# is the operative recommendation. The ensemble code is retained behind this flag
+# for revisiting if the surrogate is ever fixed. Set FUTURE_ENSEMBLE_ENABLED=1 to
+# re-emit future_outcome_table_ensemble.csv.
+FUTURE_ENSEMBLE_ENABLED = os.environ.get('FUTURE_ENSEMBLE_ENABLED', '').strip() in ('1', 'true', 'True')
+FUTURE_ENSEMBLE_K = 5
+_ensemble_k_override = os.environ.get('FUTURE_ENSEMBLE_K_OVERRIDE', '').strip()
+if _ensemble_k_override:
+    FUTURE_ENSEMBLE_K = max(1, int(_ensemble_k_override))
 
 # === H2H K SEARCH RANGE ===
 H2H_K_RANGE = (1, 10)
@@ -1925,6 +1939,11 @@ def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
     conservative_pick = ranked.sort_values('ConservativeScore', ascending=False).head(1).copy()
     aggressive_pick = ranked.sort_values('AggressiveScore', ascending=False).head(1).copy()
 
+    # Top-K by Balanced for the ensemble outcome table. Pulled here so the
+    # decision frame can flag them and the main flow can build the ensemble.
+    ensemble_top_k = ranked.sort_values('BalancedScore', ascending=False).head(FUTURE_ENSEMBLE_K).copy()
+    ensemble_run_ids = set(ensemble_top_k['RunID'].tolist())
+
     decision = pd.concat([balanced_pick, conservative_pick, aggressive_pick, ranked], ignore_index=False)
     decision = decision.drop_duplicates(subset=['RunID']).head(target_size).copy()
     decision = decision.reset_index(drop=True)
@@ -1936,6 +1955,7 @@ def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
     decision['IsBalancedRecommendation'] = decision['RunID'] == balanced_run_id
     decision['IsConservativeRecommendation'] = decision['RunID'] == conservative_run_id
     decision['IsAggressiveRecommendation'] = decision['RunID'] == aggressive_run_id
+    decision['IsEnsembleMember'] = decision['RunID'].isin(ensemble_run_ids)
 
     def recommendation_label(row):
         labels = []
@@ -1949,6 +1969,67 @@ def build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE):
 
     decision['RecommendationLabel'] = decision.apply(recommendation_label, axis=1)
     return decision
+
+
+def build_ensemble_outcome_table(all_pred_df, ensemble_run_ids, k_used):
+    """Average top-K runs' per-match predictions into one ensemble outcome table.
+
+    The surrogate ranker has been measured to be near-random on individual
+    matchdays, so picking a single top candidate exposes the prediction to
+    ranker noise. Averaging the top-K candidates' probabilities per match
+    bounds the worst-case behaviour while preserving signal when the ranker
+    is correct.
+    """
+    if all_pred_df is None or all_pred_df.empty or not ensemble_run_ids:
+        return pd.DataFrame()
+
+    member_rows = all_pred_df[all_pred_df['RunID'].isin(ensemble_run_ids)].copy()
+    if member_rows.empty:
+        return pd.DataFrame()
+
+    # Columns averaged across the K candidates.
+    avg_cols = [
+        'WinProb', 'DrawProb', 'LoseProb',
+        'PredictedGoalDiff', 'ExpectedHomeGoals', 'ExpectedAwayGoals',
+    ]
+    for c in avg_cols:
+        if c in member_rows.columns:
+            member_rows[c] = pd.to_numeric(member_rows[c], errors='coerce')
+
+    grouped = member_rows.groupby('MatchID', sort=False)
+    meta = grouped.first()[
+        [c for c in ['MatchDate', 'HomeTeam', 'AwayTeam', 'PredictionMode', 'MatchStatsMode']
+         if c in member_rows.columns]
+    ]
+    averaged = grouped[[c for c in avg_cols if c in member_rows.columns]].mean()
+    ensemble = pd.concat([meta, averaged], axis=1).reset_index()
+
+    # Renormalise WinProb/DrawProb/LoseProb to sum to 1 (FP drift defence).
+    prob_cols = [c for c in ['WinProb', 'DrawProb', 'LoseProb'] if c in ensemble.columns]
+    if len(prob_cols) == 3:
+        s = ensemble[prob_cols].sum(axis=1).replace(0, 1.0)
+        for c in prob_cols:
+            ensemble[c] = ensemble[c] / s
+
+        # Re-derive PredictedResult from the averaged probabilities.
+        outcome_map = {'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'}
+        ensemble['PredictedResult'] = ensemble[prob_cols].idxmax(axis=1).map(outcome_map)
+        ensemble['MostLikelyOutcomeProbability'] = ensemble[prob_cols].max(axis=1)
+        ensemble['MostLikelyOutcome'] = ensemble['PredictedResult'].map({
+            'H': 'HomeWin', 'D': 'Draw', 'A': 'AwayWin'
+        })
+
+    # Scoreline from rounded expected goals (same convention as single-pick).
+    if {'ExpectedHomeGoals', 'ExpectedAwayGoals'}.issubset(ensemble.columns):
+        ensemble['PredictedHomeGoals'] = ensemble['ExpectedHomeGoals'].round().clip(lower=0).astype('Int64')
+        ensemble['PredictedAwayGoals'] = ensemble['ExpectedAwayGoals'].round().clip(lower=0).astype('Int64')
+        ensemble['PredictedScoreline'] = (
+            ensemble['PredictedHomeGoals'].astype(str) + ':' + ensemble['PredictedAwayGoals'].astype(str)
+        )
+
+    ensemble['EnsembleSize'] = int(k_used)
+    ensemble['EnsembleMembers'] = ','.join(str(int(r)) for r in sorted(ensemble_run_ids))
+    return ensemble
 
 
 def drop_empty_weight_columns(df):
@@ -2796,8 +2877,29 @@ else:
             outcome_table = outcome_table[final_cols].sort_values('MatchDate')
             outcome_table.to_csv(FUTURE_OUTCOME_TABLE_PATH, index=False)
             print(outcome_table.head(10))
+
+        # Ensemble outcome table: averages the top-K candidates' per-match probs.
+        # DISABLED by default (lost to single-pick on every backtested matchday).
+        # Gated behind FUTURE_ENSEMBLE_ENABLED so the validation code stays intact
+        # without affecting the operative single-pick recommendation.
+        if FUTURE_ENSEMBLE_ENABLED:
+            ensemble_ranking = build_future_candidate_ranking(summary_df, PARETO_TARGET_SIZE)
+            if not ensemble_ranking.empty and 'IsEnsembleMember' in ensemble_ranking.columns:
+                ensemble_member_ids = set(
+                    ensemble_ranking.loc[ensemble_ranking['IsEnsembleMember'], 'RunID'].tolist()
+                )
+                ensemble_table = build_ensemble_outcome_table(
+                    all_pred_df, ensemble_member_ids, len(ensemble_member_ids)
+                )
+                if not ensemble_table.empty:
+                    if 'MatchDate' in ensemble_table.columns:
+                        ensemble_table = ensemble_table.sort_values('MatchDate')
+                    ensemble_table.to_csv(FUTURE_OUTCOME_TABLE_ENSEMBLE_PATH, index=False)
+                    print(f"Ensemble outcome table (K={len(ensemble_member_ids)}) saved to {FUTURE_OUTCOME_TABLE_ENSEMBLE_PATH}")
     else:
         pd.DataFrame().to_csv(RUN_SUMMARY_OUT_PATH, index=False)
         persist_decision_table(pd.DataFrame(), PARETO_OUT_PATH)
         if PREDICTION_MODE != 'reference':
             pd.DataFrame().to_csv(FUTURE_OUTCOME_TABLE_PATH, index=False)
+        if FUTURE_ENSEMBLE_ENABLED:
+            pd.DataFrame().to_csv(FUTURE_OUTCOME_TABLE_ENSEMBLE_PATH, index=False)
