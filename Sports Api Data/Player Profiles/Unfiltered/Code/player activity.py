@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import time
@@ -8,7 +9,9 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Konfiguration
 # ---------------------------
-INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles_78.json"
+# Alle Profil-Dateien (Bundesliga + internationale Wettbewerbe) einlesen
+INPUT_DIR = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
+INPUT_PATTERN = os.path.join(INPUT_DIR, "players_profiles*.json")
 OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_activity_78.json"
 API_URL    = "https://v3.football.api-sports.io/players/seasons"
 HEADERS    = {
@@ -16,21 +19,40 @@ HEADERS    = {
     'x-rapidapi-key': "5fa2372f2bfcbedb8ef7b85c86f0a27a"
 }
 
-def fetch_player_activity():
-    # 1) Spieler-IDs aus Profil-Datei laden
-    with open(INPUT_JSON, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+def fetch_player_activity(refresh_existing=False):
+    # 1) Spieler-IDs aus allen Profil-Dateien laden (Bundesliga + international)
+    player_ids = []
+    seen = set()
+    for path in sorted(glob.glob(INPUT_PATTERN)):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Fehler beim Laden von {path}: {e}")
+            continue
+        for p in data.get("players", []):
+            pid = p.get("player_id")
+            if pid is not None and pid not in seen:
+                seen.add(pid)
+                player_ids.append(pid)
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Gefundene {len(player_ids)} eindeutige Spieler-IDs")
 
-    player_ids = [
-        p.get("player_id")
-        for p in data.get("players", [])
-        if p.get("player_id") is not None
+    # 1.1) Bereits abgefragte Spieler laden (inkrementell)
+    seasons_by_player = {}
+    if not refresh_existing and os.path.exists(OUTPUT_JSON):
+        try:
+            with open(OUTPUT_JSON, 'r', encoding='utf-8') as f:
+                seasons_by_player = json.load(f).get("players_seasons", {})
+        except Exception:
+            seasons_by_player = {}
+    ids_to_fetch = [
+        pid for pid in player_ids
+        if refresh_existing or not seasons_by_player.get(str(pid))
     ]
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Gefundene {len(player_ids)} Spieler-IDs")
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Davon neu abzufragen: {len(ids_to_fetch)}")
 
     # 2) Abfrage der Seasons für jeden Spieler
-    seasons_by_player = {}
-    for pid in player_ids:
+    for pid in ids_to_fetch:
         print(f"Hole Seasons für Spieler {pid} …")
         try:
             resp = requests.get(API_URL, params={"player": pid}, headers=HEADERS, timeout=10)
