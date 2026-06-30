@@ -74,8 +74,15 @@
 
   function renderHero() {
     var m = DATA.meta;
+    var mdLabel = m.matchdayLabel || ("Matchday " + m.matchday);
+
+    document.title = "ORAKEL — " + m.league + " match intelligence";
     $("[data-eyebrow]").textContent =
-      m.league + " · Season " + m.season + " · Matchday " + m.matchday;
+      m.league + " · Season " + m.season + " · " + mdLabel;
+    var leagueWord = $("[data-league]");
+    if (leagueWord) leagueWord.textContent = m.league;
+    var signals = $("[data-signals]");
+    if (signals) signals.textContent = m.signalsPerMatch;
 
     var played = DATA.matches.filter(function (x) { return x.result && x.result.outcome; });
     var correct = played.filter(function (x) {
@@ -97,7 +104,7 @@
 
     var stats = [
       { value: DATA.matches.length, label: "Matches called",
-        sub: "Matchday " + m.matchday + " fixtures" },
+        sub: mdLabel + " fixtures" },
       { value: rate, unit: "%", label: "Outcome hit rate",
         sub: correct + " of " + played.length + " correct" },
       { value: topConf, unit: "%", label: "Top-call confidence",
@@ -120,7 +127,7 @@
 
     // results section meta
     $("#results-caption").textContent =
-      "Matchday " + m.matchday + " · " + fmtDate(m.matchdayDate);
+      mdLabel + " · " + fmtDate(m.matchdayDate);
     $("#verdict-summary").innerHTML =
       "<b>" + correct + "/" + played.length + "</b> outcomes called correctly";
     $("#predictions-caption").textContent =

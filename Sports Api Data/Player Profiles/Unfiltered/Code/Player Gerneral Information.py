@@ -13,8 +13,10 @@ API_HOST    = "https://v3.football.api-sports.io"
 API_KEY     = "5fa2372f2bfcbedb8ef7b85c86f0a27a"
 # Basis-Ausgabepfad; für jede Liga wird eine eigene Datei erstellt
 OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles"
-# Liste der Liga-IDs, die abgefragt werden sollen; hier zunächst nur Bundesliga
-LEAGUE_IDS  = [78]  # später weitere hinzufügen, z.B. LEAGUE_IDS = [78, 39]
+# Liste der Liga-IDs, die abgefragt werden sollen
+# 78 = Bundesliga, 1 = World Cup, 4 = Euro Championship,
+# 5 = UEFA Nations League, 10 = Friendlies (international)
+LEAGUE_IDS  = [78, 1, 4, 5, 10]
 
 RETRY_LIMIT = 3
 RETRY_DELAY = 5  # Sekunden zwischen Versuchen

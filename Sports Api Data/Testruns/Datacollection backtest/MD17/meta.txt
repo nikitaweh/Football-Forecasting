@@ -1,0 +1,4 @@
+Matchday: 17
+Cutoff: 2026-01-13
+Fixtures: 9
+Outputs copied: 4

@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 import time
@@ -9,7 +10,9 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Konfiguration
 # ---------------------------
-INPUT_JSON  = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles_78.json"
+# Alle Profil-Dateien (Bundesliga + internationale Wettbewerbe) einlesen
+INPUT_DIR     = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
+INPUT_PATTERN = os.path.join(INPUT_DIR, "players_profiles*.json")
 OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/transferhistory_78.json"
 
 API_HOST    = "v3.football.api-sports.io"
@@ -19,23 +22,39 @@ HEADERS     = {
     'x-rapidapi-key':  API_KEY
 }
 
-def fetch_transfer_history():
-    # 1) Spieler-IDs sammeln
-    with open(INPUT_JSON, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    player_ids = {
-        str(p.get("player_id"))
-        for p in data.get("players", [])
-        if p.get("player_id") is not None
-    }
+def fetch_transfer_history(refresh_existing=False):
+    # 1) Spieler-IDs aus allen Profil-Dateien sammeln (Bundesliga + international)
+    player_ids = set()
+    for path in sorted(glob.glob(INPUT_PATTERN)):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Fehler beim Laden von {path}: {e}")
+            continue
+        for p in data.get("players", []):
+            if p.get("player_id") is not None:
+                player_ids.add(str(p.get("player_id")))
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Gefundene {len(player_ids)} eindeutige Spieler-IDs")
+
+    # 1.1) Bereits abgefragte Spieler laden (inkrementell)
+    all_transfers = {}
+    if not refresh_existing and os.path.exists(OUTPUT_JSON):
+        try:
+            with open(OUTPUT_JSON, 'r', encoding='utf-8') as f:
+                all_transfers = json.load(f).get("transfers_by_player", {})
+        except Exception:
+            all_transfers = {}
+    ids_to_fetch = sorted(
+        pid for pid in player_ids
+        if refresh_existing or not all_transfers.get(pid)
+    )
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Davon neu abzufragen: {len(ids_to_fetch)}")
 
     # 2) Transfer-History abfragen
     conn = http.client.HTTPSConnection(API_HOST)
-    all_transfers = {}
 
-    for pid in sorted(player_ids):
+    for pid in ids_to_fetch:
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Hole Transfers für Spieler {pid} …")
         path = f"/transfers?player={pid}"
         conn.request("GET", path, headers=HEADERS)
