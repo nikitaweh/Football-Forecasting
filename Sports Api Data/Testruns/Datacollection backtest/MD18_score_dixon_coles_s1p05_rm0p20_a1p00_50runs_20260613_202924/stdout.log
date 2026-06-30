@@ -1,0 +1,176 @@
+Prediction mode: reference
+Match stats mode: predicted
+Outcome probability mode: score_dixon_coles (scale=1.05, rho=-0.2, alpha=1.0)
+Output path: C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns\Datacollection reference
+Surrogate history source: C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns\Datacollection reference\surrogate_run_history.csv
+Referenzspiele fuer Debugging/Training: 9
+Training matches after excluding reference targets: 2761
+Backtest date cutoff 2026-01-16: training matches reduced from 2761 to 2612.
+               Target  ObservedRows  UniqueValues  FallbackValue  UsedModel
+0              HomeXG           933           323           1.50       True
+1              AwayXG           933           287           1.19       True
+2      HomePossession          2611            67          52.00       True
+3      AwayPossession          2611            67          48.00       True
+4           HomeShots          2611            28          10.00       True
+5           AwayShots          2611            27           9.00       True
+6   HomeShotsOnTarget          2611            18           5.00       True
+7   AwayShotsOnTarget          2611            16           4.00       True
+8          HomePasses          2611           568         456.00       True
+9          AwayPasses          2611           539         426.00       True
+10   HomePassAccuracy          2611            45          80.00       True
+11   AwayPassAccuracy          2611            43          78.00       True
+12          HomeFouls          2611            25          12.00       True
+13          AwayFouls          2611            26          12.00       True
+14     HomeYellowCard          2511             9           2.00       True
+15     AwayYellowCard          2511             8           2.00       True
+16        HomeRedCard           799             3           0.00       True
+17        AwayRedCard           798             3           0.00       True
+18       HomeOffsides          2519            11           2.00       True
+19       AwayOffsides          2519             9           2.00       True
+20        HomeCorners          2611            20           5.00       True
+21        AwayCorners          2611            16           4.00       True
+GoalDiff NaNs: 0
+X_train NaNs (raw): 5061
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn
+Starting sampling
+Starting burn

@@ -2,3 +2,4 @@
 *.json filter=lfs diff=lfs merge=lfs -text
 Sports[[:space:]]Api[[:space:]]Data/Bundesliga/Unfiltered/Datacollection/player_statistics_per_fixture_league_78.json.corrupt_* filter=lfs diff=lfs merge=lfs -text
 *.json.corrupt_* filter=lfs diff=lfs merge=lfs -text
+*.pkl filter=lfs diff=lfs merge=lfs -text

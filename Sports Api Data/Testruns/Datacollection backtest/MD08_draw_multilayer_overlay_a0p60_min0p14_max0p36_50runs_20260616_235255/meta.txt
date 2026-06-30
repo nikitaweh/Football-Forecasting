@@ -1,0 +1,15 @@
+Matchday: 8
+Cutoff: 2025-10-24
+Fixtures: 9
+MAX_RUNS: 50
+MATCH_STATS_MODE: predicted
+OUTCOME_PROBABILITY_MODE: draw_multilayer_overlay
+DRAW_OVERLAY_ALPHA: (model default)
+DRAW_OVERLAY_MIN_PROB: (model default)
+DRAW_OVERLAY_MAX_PROB: (model default)
+DRAW_OVERLAY_GOALDIFF_SCALE: (model default)
+DRAW_OVERLAY_SIGNAL_SCALE: (model default)
+DRAW_OVERLAY_TOTAL_GOALS_CAP: (model default)
+Pipeline return code: 0
+Outputs copied: 4
+Best summary row: RunID=15, AvgNLL=0.526696, Accuracy=0.8888888888888888

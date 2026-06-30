@@ -1,0 +1,202 @@
+# plots.R - pure plotting helpers (plotly). Each takes an already-filtered data
+# frame and returns a plotly object; data prep / coercion happens in app.R.
+
+suppressMessages({
+  library(plotly)
+  library(dplyr)
+})
+
+# simple centered moving average (window n, NA-padded) for the rolling overlay
+.roll_mean <- function(x, n = 3) {
+  if (length(x) < n) return(rep(NA_real_, length(x)))
+  as.numeric(stats::filter(x, rep(1 / n, n), sides = 2))
+}
+
+# ── Season curve: NLL across matchdays, model vs bookie ──────────────────────
+season_nll_plot <- function(df, rolling = FALSE) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No matchday data"))
+  df <- dplyr::arrange(df, Matchday)
+  marker_col <- ifelse(isTRUE_vec(df$BeatsBookie), PAL$good, PAL$bad)
+
+  p <- plot_ly(df, x = ~Matchday)
+  p <- add_trace(p, y = ~BookieNLL, type = "scatter", mode = "lines",
+                 name = "Bookie (BWIN)", line = list(color = PAL$bookie, dash = "dot", width = 2),
+                 hovertemplate = "MD%{x}: bookie %{y:.3f}<extra></extra>")
+  if ("MeanNLL" %in% names(df)) {
+    p <- add_trace(p, y = ~MeanNLL, type = "scatter", mode = "lines",
+                   name = "Mean run", line = list(color = PAL$mean, width = 1.5),
+                   hovertemplate = "MD%{x}: mean %{y:.3f}<extra></extra>")
+  }
+  if ("EnsembleNLL" %in% names(df) && any(is.finite(df$EnsembleNLL))) {
+    p <- add_trace(p, y = ~EnsembleNLL, type = "scatter", mode = "lines",
+                   name = "Ensemble", line = list(color = PAL$ensemble, width = 1.6),
+                   connectgaps = FALSE,
+                   hovertemplate = "MD%{x}: ensemble %{y:.3f}<extra></extra>")
+  }
+  p <- add_trace(p, y = ~BestNLL, type = "scatter", mode = "lines+markers",
+                 name = "Best run", line = list(color = PAL$model, width = 2.4),
+                 marker = list(color = marker_col, size = 8,
+                               line = list(color = "white", width = 1)),
+                 text = ifelse(isTRUE_vec(df$BeatsBookie), "beats bookie", "below bookie"),
+                 hovertemplate = "MD%{x}: best %{y:.3f}<br>%{text}<extra></extra>")
+  if (rolling) {
+    p <- add_trace(p, y = .roll_mean(df$BestNLL, 3), type = "scatter", mode = "lines",
+                   name = "Best (3-MD avg)", line = list(color = PAL$model, width = 1, dash = "dash"),
+                   hoverinfo = "skip")
+  }
+  plotly_base(p, ylab = "NLL (lower = better)", xlab = "Matchday")
+}
+
+# ── Season curve: accuracy across matchdays ──────────────────────────────────
+season_acc_plot <- function(df) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No matchday data"))
+  df <- dplyr::arrange(df, Matchday)
+  p <- plot_ly(df, x = ~Matchday)
+  if ("MeanAcc" %in% names(df)) {
+    p <- add_trace(p, y = ~MeanAcc, type = "scatter", mode = "lines",
+                   name = "Mean run", line = list(color = PAL$mean, width = 1.5),
+                   hovertemplate = "MD%{x}: mean %{y:.0%}<extra></extra>")
+  }
+  if ("EnsembleAcc" %in% names(df) && any(is.finite(df$EnsembleAcc))) {
+    p <- add_trace(p, y = ~EnsembleAcc, type = "scatter", mode = "lines",
+                   name = "Ensemble", line = list(color = PAL$ensemble, width = 1.6),
+                   connectgaps = FALSE,
+                   hovertemplate = "MD%{x}: ensemble %{y:.0%}<extra></extra>")
+  }
+  p <- add_trace(p, y = ~BestAcc, type = "scatter", mode = "lines+markers",
+                 name = "Best run", line = list(color = PAL$model, width = 2.4),
+                 marker = list(color = PAL$model, size = 7, line = list(color = "white", width = 1)),
+                 hovertemplate = "MD%{x}: best %{y:.0%}<extra></extra>")
+  plotly_base(p, ylab = "Accuracy", xlab = "Matchday") |>
+    plotly::layout(yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
+}
+
+# ── Mode comparison: best metric per variant for one matchday ────────────────
+mode_metric_bar <- function(df, metric = c("BestAvgNLL", "BestAccuracy"), bookie = NA_real_) {
+  metric <- match.arg(metric)
+  if (is.null(df) || !nrow(df)) return(empty_plot("No mode data for this matchday"))
+  df <- dplyr::arrange(df, .data[[metric]])
+  is_base <- df$Mode == "baseline"
+  bar_col <- ifelse(is_base, PAL$model, PAL$ensemble)
+  fmt <- if (metric == "BestAccuracy") ".0%" else ".3f"
+  p <- plot_ly(df, x = ~Variant, y = df[[metric]], type = "bar",
+               marker = list(color = bar_col),
+               hovertemplate = paste0("%{x}: %{y:", fmt, "}<extra></extra>"))
+  if (metric == "BestAvgNLL" && is.finite(bookie)) {
+    p <- add_trace(p, x = df$Variant, y = rep(bookie, nrow(df)), type = "scatter",
+                   mode = "lines", name = "Bookie", inherit = FALSE,
+                   line = list(color = PAL$bookie, dash = "dot", width = 2),
+                   hoverinfo = "skip")
+  }
+  ylab <- if (metric == "BestAccuracy") "Best-run accuracy" else "Best-run NLL"
+  pb <- plotly_base(p, ylab = ylab, xlab = NULL, hovermode = "closest") |>
+    plotly::layout(showlegend = FALSE, xaxis = list(tickangle = -20))
+  if (metric == "BestAccuracy") pb <- plotly::layout(pb, yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
+  pb
+}
+
+# ── Mode comparison: per-outcome (H/D/A) NLL guardrail for one matchday ───────
+per_outcome_bar <- function(df) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No per-outcome data"))
+  df <- df[df$Outcome %in% c("H", "D", "A"), , drop = FALSE]
+  if (!nrow(df)) return(empty_plot("No per-outcome data"))
+  df$Outcome <- factor(df$Outcome, levels = c("H", "D", "A"))
+  variants <- unique(df$Variant)
+  p <- plot_ly()
+  pal_cycle <- c(PAL$model, PAL$ensemble, "#0ea5e9", "#f59e0b", "#10b981", "#ec4899")
+  for (i in seq_along(variants)) {
+    v <- variants[[i]]
+    sub <- df[df$Variant == v, ]
+    col <- if (v == "BWIN bookie") PAL$bookie else pal_cycle[((i - 1) %% length(pal_cycle)) + 1]
+    p <- add_trace(p, x = sub$Outcome, y = sub$NLL, type = "bar", name = v,
+                   marker = list(color = col),
+                   hovertemplate = paste0(v, " %{x}: %{y:.3f}<extra></extra>"))
+  }
+  plotly_base(p, ylab = "Per-outcome NLL", xlab = "Actual outcome", hovermode = "closest") |>
+    plotly::layout(barmode = "group")
+}
+
+# ── Run distributions: box of per-run metric per matchday ────────────────────
+run_box_plot <- function(df, metric = c("AvgNLL", "Accuracy")) {
+  metric <- match.arg(metric)
+  if (is.null(df) || !nrow(df)) return(empty_plot("No run data"))
+  df$Matchday <- factor(df$Matchday, levels = sort(unique(df$Matchday)))
+  df$Group <- ifelse(df$Mode == "baseline", "baseline", "mode variant")
+  p <- plot_ly()
+  for (g in unique(df$Group)) {
+    sub <- df[df$Group == g, ]
+    col <- if (g == "baseline") PAL$model else PAL$ensemble
+    p <- add_trace(p, x = sub$Matchday, y = sub[[metric]], type = "box", name = g,
+                   marker = list(color = col, size = 3), line = list(color = col),
+                   fillcolor = paste0(col, "22"), boxpoints = "outliers")
+  }
+  ylab <- if (metric == "Accuracy") "Per-run accuracy" else "Per-run NLL"
+  pb <- plotly_base(p, ylab = ylab, xlab = "Matchday", hovermode = "closest") |>
+    plotly::layout(boxmode = "group")
+  if (metric == "Accuracy") pb <- plotly::layout(pb, yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
+  pb
+}
+
+# ── International: mean metric by competition ─────────────────────────────────
+intl_competition_bar <- function(df, metric = c("NLL", "Accuracy")) {
+  metric <- match.arg(metric)
+  if (is.null(df) || !nrow(df)) return(empty_plot("No international data"))
+  agg <- df |>
+    dplyr::group_by(Competition) |>
+    dplyr::summarise(value = if (metric == "Accuracy") mean(Correct, na.rm = TRUE) else mean(NLL, na.rm = TRUE),
+                     n = dplyr::n(), .groups = "drop") |>
+    dplyr::arrange(value)
+  fmt <- if (metric == "Accuracy") ".0%" else ".3f"
+  p <- plot_ly(agg, x = ~value, y = ~Competition, type = "bar", orientation = "h",
+               marker = list(color = PAL$model),
+               text = ~paste0("n=", n), textposition = "outside", cliponaxis = FALSE,
+               hovertemplate = paste0("%{y}: %{x:", fmt, "} (n=%{text})<extra></extra>"))
+  xlab <- if (metric == "Accuracy") "Accuracy" else "Mean NLL"
+  pb <- plotly_base(p, ylab = NULL, xlab = xlab, hovermode = "closest") |>
+    plotly::layout(margin = list(l = 150))
+  if (metric == "Accuracy") pb <- plotly::layout(pb, xaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
+  pb
+}
+
+# ── International: actual outcome distribution ────────────────────────────────
+intl_outcome_bar <- function(df) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No international data"))
+  tab <- as.data.frame(table(factor(df$Outcome, levels = c("H", "D", "A"))))
+  names(tab) <- c("Outcome", "n")
+  p <- plot_ly(tab, x = ~Outcome, y = ~n, type = "bar",
+               marker = list(color = c(PAL$H, PAL$D, PAL$A)),
+               hovertemplate = "%{x}: %{y} matches<extra></extra>")
+  plotly_base(p, ylab = "Matches", xlab = "Actual outcome", hovermode = "closest") |>
+    plotly::layout(showlegend = FALSE)
+}
+
+# ── International: multiclass reliability diagram ─────────────────────────────
+# Pools the 3 class probabilities; bins predicted prob, plots mean predicted vs
+# observed frequency. On the diagonal = well calibrated.
+intl_calibration_plot <- function(df, bins = 8) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No international data"))
+  long <- rbind(
+    data.frame(p = df$WinProb,  hit = as.integer(df$Outcome == "H")),
+    data.frame(p = df$DrawProb, hit = as.integer(df$Outcome == "D")),
+    data.frame(p = df$LoseProb, hit = as.integer(df$Outcome == "A"))
+  )
+  long <- long[is.finite(long$p), ]
+  if (!nrow(long)) return(empty_plot("No international data"))
+  br <- seq(0, 1, length.out = bins + 1)
+  long$bin <- cut(long$p, breaks = br, include.lowest = TRUE)
+  agg <- long |>
+    dplyr::group_by(bin) |>
+    dplyr::summarise(pred = mean(p), obs = mean(hit), n = dplyr::n(), .groups = "drop")
+  p <- plot_ly()
+  p <- add_trace(p, x = c(0, 1), y = c(0, 1), type = "scatter", mode = "lines",
+                 name = "perfect", line = list(color = PAL$bookie, dash = "dot", width = 1.5),
+                 hoverinfo = "skip")
+  p <- add_trace(p, data = agg, x = ~pred, y = ~obs, type = "scatter", mode = "lines+markers",
+                 name = "model", line = list(color = PAL$model, width = 2),
+                 marker = list(color = PAL$model, size = ~pmax(6, pmin(20, sqrt(n) * 2))),
+                 text = ~paste0("n=", n),
+                 hovertemplate = "pred %{x:.0%} -> obs %{y:.0%}<br>%{text}<extra></extra>")
+  plotly_base(p, ylab = "Observed frequency", xlab = "Predicted probability", hovermode = "closest") |>
+    plotly::layout(xaxis = list(tickformat = ".0%", range = c(0, 1), gridcolor = PAL$grid),
+                   yaxis = list(tickformat = ".0%", range = c(0, 1), gridcolor = PAL$grid))
+}

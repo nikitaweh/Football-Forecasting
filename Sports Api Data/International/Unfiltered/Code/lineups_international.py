@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import time
 from datetime import datetime
 
 import requests
@@ -23,6 +24,9 @@ REQUEST_CONNECT_TIMEOUT = 4
 REQUEST_READ_TIMEOUT = 12
 REQUEST_RETRIES = 2
 REQUEST_BACKOFF_SECONDS = 1.0
+
+# Beendete Spielstatus bei internationalen Spielen (inkl. Verlaengerung/Elfmeterschiessen)
+FINISHED_STATUSES = {"FT", "AET", "PEN"}
 
 
 def remove_keys(obj, keys_to_remove):
@@ -65,66 +69,79 @@ def _api_get_json(session, endpoint, params=None):
 
 
 def collect_lineups(full_load=False):
-    if full_load:
-        print(f"[{datetime.now()}] Hinweis: --full-load ist deaktiviert. Es wird inkrementell fortgesetzt.")
-    print(f"[{datetime.now()}] Starte Abruf der Lineup-Daten (international, inkrementell) ...")
+    print(f"[{datetime.now()}] Starte Abruf der Lineup-Daten (international, full_load={full_load}) ...")
 
     try:
         with open(FIXTURES_FILE_PATH, "r", encoding="utf-8") as f:
             fixtures_data = json.load(f).get("response", [])
+        print(f"[{datetime.now()}] {len(fixtures_data)} Fixtures geladen.")
     except FileNotFoundError:
         print(f"[{datetime.now()}] FEHLER: Fixture-Datei nicht gefunden.")
         return
 
-    fixture_ids = [fx.get("fixture", {}).get("id") for fx in fixtures_data if fx.get("fixture", {}).get("id")]
-    print(f"[{datetime.now()}] Gefundene Fixture-IDs: {len(fixture_ids)}")
-
-    try:
-        with open(OUTPUT_FILE_PATH, "r", encoding="utf-8") as f:
-            existing_lineups = json.load(f).get("response", [])
-    except (FileNotFoundError, json.JSONDecodeError):
+    if full_load:
+        if os.path.exists(OUTPUT_FILE_PATH):
+            os.remove(OUTPUT_FILE_PATH)
+            print(f"[{datetime.now()}] Alte Lineup-Datei geloescht (Full-Load).")
         existing_lineups = []
+        existing_ids = set()
+    else:
+        try:
+            with open(OUTPUT_FILE_PATH, "r", encoding="utf-8") as f:
+                existing_lineups = json.load(f).get("response", [])
+            print(f"[{datetime.now()}] {len(existing_lineups)} bestehende Lineups geladen.")
+        except (FileNotFoundError, json.JSONDecodeError):
+            existing_lineups = []
+            print(f"[{datetime.now()}] Keine bestehende Lineup-Datei gefunden; neue Liste erstellt.")
+        existing_ids = {
+            ln.get("fixture_id")
+            for ln in existing_lineups
+            if ln.get("fixture_id") is not None
+        }
 
-    existing_by_id = {
-        ln.get("fixture_id"): ln
-        for ln in existing_lineups
-        if ln.get("fixture_id") is not None
-    }
-    ids_with_data = {
-        fid
-        for fid, ln in existing_by_id.items()
-        if isinstance(ln.get("response"), list) and len(ln.get("response")) > 0
-    }
+    to_fetch = []
+    for fx in fixtures_data:
+        fixture = fx.get("fixture", {})
+        status_short = fixture.get("status", {}).get("short")
+        match_id = fixture.get("id")
 
-    refreshed = 0
+        if status_short not in FINISHED_STATUSES or match_id in existing_ids:
+            continue
+        to_fetch.append(match_id)
+
+    print(f"[{datetime.now()}] {len(to_fetch)} abgeschlossene Matches zum Abruf gefunden.")
+
+    if not to_fetch:
+        print(f"[{datetime.now()}] Keine neuen Lineups gefunden.")
+        return
+
+    new_lineups = []
     refreshed_with_data = 0
     with _build_session() as session:
-        for fid in fixture_ids:
-            if fid in ids_with_data:
+        for idx, match_id in enumerate(to_fetch, 1):
+            print(f"[{idx}/{len(to_fetch)}] Abruf fuer Match-ID {match_id}...")
+            try:
+                lineup_data = _api_get_json(session, "/fixtures/lineups", params={"fixture": match_id})
+            except Exception as exc:
+                print(f"[{idx}/{len(to_fetch)}] Fehler fuer Match-ID {match_id}: {exc}")
                 continue
 
-            try:
-                lineup_data = _api_get_json(session, "/fixtures/lineups", params={"fixture": fid})
-            except Exception as exc:
-                print(f"[{datetime.now()}] Fehler bei Fixture {fid}: {exc}")
-                lineup_data = {"response": []}
-
             remove_keys(lineup_data, {"logo", "photo"})
-            lineup_data["fixture_id"] = fid
-            existing_by_id[fid] = lineup_data
-            refreshed += 1
+            lineup_data["fixture_id"] = match_id
+            new_lineups.append(lineup_data)
 
             if isinstance(lineup_data.get("response"), list) and len(lineup_data.get("response")) > 0:
                 refreshed_with_data += 1
+            time.sleep(0.12)
 
-    existing_lineups = [existing_by_id[fid] for fid in fixture_ids if fid in existing_by_id]
+    existing_lineups.extend(new_lineups)
     os.makedirs(os.path.dirname(OUTPUT_FILE_PATH), exist_ok=True)
     with open(OUTPUT_FILE_PATH, "w", encoding="utf-8") as f:
         json.dump({"response": existing_lineups}, f, ensure_ascii=False, indent=4)
 
     print(
-        f"[{datetime.now()}] Aktualisiert {refreshed} Fixture-Datensaetze "
-        f"({refreshed_with_data} mit Lineups) in {OUTPUT_FILE_PATH}"
+        f"[{datetime.now()}] {len(new_lineups)} neue Lineup-Datensaetze "
+        f"({refreshed_with_data} mit Lineups) gespeichert in {OUTPUT_FILE_PATH}"
     )
 
 
@@ -133,7 +150,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--full-load",
         action="store_true",
-        help="Deaktiviert: wird ignoriert, es laeuft immer inkrementell",
+        help="Alle beendeten Spiele neu abfragen (alte Daten werden geloescht)",
     )
     args = parser.parse_args()
 

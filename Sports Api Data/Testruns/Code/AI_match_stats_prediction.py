@@ -1,9 +1,18 @@
 import math
 import os
 import random
+import sys
 from datetime import datetime
 import pandas as pd
 from bartpy.sklearnmodel import SklearnModel
+
+# The project venv uses an isolated Python path on Windows and does not add the
+# script directory automatically. Add it explicitly for local feature modules.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+from player_workload_features import build_player_workload_index, player_workload_at
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.model_selection import KFold, train_test_split
@@ -20,7 +29,14 @@ WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
 LINEUPS_PATH = os.path.join(DATA_PATH, 'lineups_league_78.csv')
 INJURIES_PATH = os.path.join(DATA_PATH, 'injuries_league_78.csv')
 PLAYER_STATS_PATH = os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv')
-MAX_RUNS = 200
+INTERNATIONAL_DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/International/Filtered/Datacollection'
+INTERNATIONAL_FIXTURES_PATH = os.path.join(INTERNATIONAL_DATA_PATH, 'Stammdaten_international.csv')
+INTERNATIONAL_LINEUPS_PATH = os.path.join(INTERNATIONAL_DATA_PATH, 'lineups_international.csv')
+INTERNATIONAL_PLAYER_STATS_PATH = os.path.join(
+    INTERNATIONAL_DATA_PATH,
+    'player_statistics_per_fixture_international.csv'
+)
+MAX_RUNS = 30
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
 
@@ -116,7 +132,73 @@ if _ensemble_k_override:
 # === H2H K SEARCH RANGE ===
 H2H_K_RANGE = (1, 10)
 H2H_K_DEFAULT = 2
-FEATURE_SCHEMA_VERSION = 'bases_v2_hybrid'
+FEATURE_SCHEMA_VERSION = 'bases_v3_player_workload'
+
+# === OUTCOME PROBABILITY CONVERSION ===
+# Default "normal" preserves the historical GoalDiff -> Gaussian-band mapping.
+# Score-distribution modes are opt-in and use ExpectedHomeGoals/ExpectedAwayGoals
+# after BART predicts GoalDiff:
+#   score_poisson              = replace H/D/A with independent Poisson probs
+#   score_dixon_coles          = replace H/D/A with low-score-adjusted probs
+#   score_poisson_draw_ratio   = use Poisson DrawProb, keep existing H/A ratio
+#   score_dixon_coles_draw_ratio = use Dixon-Coles DrawProb, keep H/A ratio
+#   draw_multilayer_overlay    = lift draws for strength/stat similarity, keep H/A ratio
+OUTCOME_PROBABILITY_MODE = os.environ.get('OUTCOME_PROBABILITY_MODE', 'normal').strip().lower()
+SCORE_OUTCOME_PROBABILITY_MODES = {
+    'score_poisson',
+    'score_dixon_coles',
+    'score_poisson_draw_ratio',
+    'score_dixon_coles_draw_ratio',
+}
+DRAW_OVERLAY_OUTCOME_PROBABILITY_MODES = {'draw_multilayer_overlay'}
+VALID_OUTCOME_PROBABILITY_MODES = (
+    {'normal'}
+    | SCORE_OUTCOME_PROBABILITY_MODES
+    | DRAW_OVERLAY_OUTCOME_PROBABILITY_MODES
+)
+if OUTCOME_PROBABILITY_MODE not in VALID_OUTCOME_PROBABILITY_MODES:
+    raise ValueError(
+        f"OUTCOME_PROBABILITY_MODE must be one of {sorted(VALID_OUTCOME_PROBABILITY_MODES)}."
+    )
+SCORE_PROBABILITY_TOTAL_SCALE = float(os.environ.get('SCORE_PROBABILITY_TOTAL_SCALE', '1.0').strip() or '1.0')
+SCORE_PROBABILITY_RHO = float(os.environ.get('SCORE_PROBABILITY_RHO', '0.0').strip() or '0.0')
+SCORE_PROBABILITY_ALPHA = float(os.environ.get('SCORE_PROBABILITY_ALPHA', '1.0').strip() or '1.0')
+SCORE_PROBABILITY_ALPHA = max(0.0, min(1.0, SCORE_PROBABILITY_ALPHA))
+SCORE_PROBABILITY_MAX_GOALS = max(
+    5,
+    int(os.environ.get('SCORE_PROBABILITY_MAX_GOALS', '10').strip() or '10')
+)
+SCORE_PROBABILITY_PARAM_DEFAULTS = {
+    'ScoreProbabilityTotalScale': 1.0,
+    'ScoreProbabilityRho': 0.0,
+    'ScoreProbabilityAlpha': 1.0,
+}
+DRAW_OVERLAY_ALPHA = float(os.environ.get('DRAW_OVERLAY_ALPHA', '0.60').strip() or '0.60')
+DRAW_OVERLAY_ALPHA = max(0.0, min(1.0, DRAW_OVERLAY_ALPHA))
+DRAW_OVERLAY_MIN_PROB = float(os.environ.get('DRAW_OVERLAY_MIN_PROB', '0.14').strip() or '0.14')
+DRAW_OVERLAY_MAX_PROB = float(os.environ.get('DRAW_OVERLAY_MAX_PROB', '0.36').strip() or '0.36')
+DRAW_OVERLAY_MIN_PROB = max(0.0, min(1.0, DRAW_OVERLAY_MIN_PROB))
+DRAW_OVERLAY_MAX_PROB = max(DRAW_OVERLAY_MIN_PROB, min(1.0, DRAW_OVERLAY_MAX_PROB))
+DRAW_OVERLAY_GOALDIFF_SCALE = max(
+    0.05,
+    float(os.environ.get('DRAW_OVERLAY_GOALDIFF_SCALE', '0.90').strip() or '0.90')
+)
+DRAW_OVERLAY_SIGNAL_SCALE = max(
+    0.05,
+    float(os.environ.get('DRAW_OVERLAY_SIGNAL_SCALE', '1.00').strip() or '1.00')
+)
+DRAW_OVERLAY_TOTAL_GOALS_CAP = max(
+    0.50,
+    float(os.environ.get('DRAW_OVERLAY_TOTAL_GOALS_CAP', '2.60').strip() or '2.60')
+)
+DRAW_OVERLAY_PARAM_DEFAULTS = {
+    'DrawOverlayAlpha': 0.60,
+    'DrawOverlayMinProb': 0.14,
+    'DrawOverlayMaxProb': 0.36,
+    'DrawOverlayGoalDiffScale': 0.90,
+    'DrawOverlaySignalScale': 1.00,
+    'DrawOverlayTotalGoalsCap': 2.60,
+}
 
 GENERAL_SUBGROUP_BLEND = {
     'GoalCreation': 0.55,
@@ -345,7 +427,8 @@ def build_player_base_features(df_src):
         'MatchID',
         'Home_PlayerBaseScore', 'Away_PlayerBaseScore',
         'Home_PlayerAbsencePenalty', 'Away_PlayerAbsencePenalty',
-        'Player_BaseDiff', 'Player_AbsencePenaltyDiff'
+        'Home_PlayerWorkload', 'Away_PlayerWorkload',
+        'Player_BaseDiff', 'Player_AbsencePenaltyDiff', 'Player_WorkloadDiff'
     ]
     match_meta = df_src[[
         'MatchID', 'MatchDate', 'HomeTeamID', 'AwayTeamID',
@@ -523,6 +606,19 @@ def build_player_base_features(df_src):
         player_stats = player_stats.reset_index()
 
     player_stats['PositionGroup'] = player_stats['PositionGroup'].fillna('MID').apply(normalize_position)
+
+    workload_index, workload_metadata = build_player_workload_index(
+        player_stats[['MatchID', 'PlayerID', 'MatchDate', 'MinutesPlayed']].copy(),
+        INTERNATIONAL_FIXTURES_PATH,
+        INTERNATIONAL_LINEUPS_PATH,
+        INTERNATIONAL_PLAYER_STATS_PATH,
+    )
+    print(
+        "Player workload events: "
+        f"{workload_metadata['event_count']} across {workload_metadata['player_count']} players "
+        f"(international exact={workload_metadata['international_exact_events']}, "
+        f"starter proxies={workload_metadata['international_proxy_events']})."
+    )
 
     minutes_factor = pd.to_numeric(player_stats['MinutesPlayed'], errors='coerce').clip(lower=0, upper=90).fillna(0.0) / 90.0
     goals = pd.to_numeric(player_stats['TotalGoals'], errors='coerce').fillna(0.0)
@@ -729,12 +825,20 @@ def build_player_base_features(df_src):
             )
 
         starter_rows['WeightedScore'] = starter_rows['EffectiveScore'] * starter_rows['PosWeight']
+        starter_rows['WorkloadIndex'] = starter_rows.apply(
+            lambda r: player_workload_at(workload_index, r['PlayerID'], match_date_lookup.get(int(r['MatchID']), pd.NaT))[0],
+            axis=1
+        )
+        starter_rows['WeightedWorkload'] = starter_rows['WorkloadIndex'] * starter_rows['PosWeight']
         agg = starter_rows.groupby(['MatchID', 'TeamID'], as_index=False).agg(
             WeightedScoreSum=('WeightedScore', 'sum'),
+            WeightedWorkloadSum=('WeightedWorkload', 'sum'),
             WeightSum=('PosWeight', 'sum')
         )
         agg['PlayerTeamScore'] = agg['WeightedScoreSum'] / agg['WeightSum'].replace(0, float('nan'))
         agg['PlayerTeamScore'] = agg['PlayerTeamScore'].fillna(global_fallback)
+        agg['PlayerWorkload'] = agg['WeightedWorkloadSum'] / agg['WeightSum'].replace(0, float('nan'))
+        agg['PlayerWorkload'] = agg['PlayerWorkload'].fillna(0.0)
 
         for _, r in agg.iterrows():
             match_id = int(r['MatchID'])
@@ -745,7 +849,8 @@ def build_player_base_features(df_src):
                 'MatchID': match_id,
                 'TeamID': team_id,
                 'PlayerTeamScore': float(r['PlayerTeamScore']),
-                'AbsencePenalty': float(compute_absence_penalty(team_id, injured, match_date))
+                'AbsencePenalty': float(compute_absence_penalty(team_id, injured, match_date)),
+                'PlayerWorkload': float(r['PlayerWorkload'])
             })
 
     future_matches = match_meta[match_meta['Played'] != True].copy()
@@ -761,6 +866,7 @@ def build_player_base_features(df_src):
             injured_players = injury_map.get((match_id, team_id), set())
 
             weighted_sum = 0.0
+            workload_weighted_sum = 0.0
             weight_total = 0.0
             for player in roster:
                 player_id = to_int_id(player.get('PlayerID'))
@@ -776,22 +882,31 @@ def build_player_base_features(df_src):
                 pos_weight_value = float(position_weight.get(pos, 1.0))
                 player_weight = pos_weight_value * start_prob
                 weighted_sum += score * player_weight
+                player_workload = player_workload_at(workload_index, player_id, match_date)[0]
+                workload_weighted_sum += player_workload * player_weight
                 weight_total += player_weight
 
             if weight_total > 0:
                 team_score = weighted_sum / weight_total
+                team_workload = workload_weighted_sum / weight_total
             else:
                 team_score = fallback_score(team_id, 'MID')
+                team_workload = 0.0
 
             team_feature_rows.append({
                 'MatchID': match_id,
                 'TeamID': team_id,
                 'PlayerTeamScore': float(team_score),
-                'AbsencePenalty': float(compute_absence_penalty(team_id, injured_players, match_date))
+                'AbsencePenalty': float(compute_absence_penalty(team_id, injured_players, match_date)),
+                'PlayerWorkload': float(team_workload)
             })
 
     team_feature_lookup = {
-        (int(r['MatchID']), int(r['TeamID'])): (float(r['PlayerTeamScore']), float(r['AbsencePenalty']))
+        (int(r['MatchID']), int(r['TeamID'])): (
+            float(r['PlayerTeamScore']),
+            float(r['AbsencePenalty']),
+            float(r.get('PlayerWorkload', 0.0))
+        )
         for r in team_feature_rows
         if r.get('MatchID') is not None and r.get('TeamID') is not None
     }
@@ -800,35 +915,45 @@ def build_player_base_features(df_src):
     away_scores = []
     home_absence = []
     away_absence = []
+    home_workload = []
+    away_workload = []
     for _, row in match_meta.iterrows():
         match_id = to_int_id(row['MatchID'])
         home_team_id = to_int_id(row['HomeTeamID'])
         away_team_id = to_int_id(row['AwayTeamID'])
 
         if match_id is not None and home_team_id is not None and (match_id, home_team_id) in team_feature_lookup:
-            h_score, h_penalty = team_feature_lookup[(match_id, home_team_id)]
+            h_score, h_penalty, h_workload = team_feature_lookup[(match_id, home_team_id)]
         else:
             h_score = fallback_score(home_team_id, 'MID')
             h_penalty = 0.0
+            h_workload = 0.0
 
         if match_id is not None and away_team_id is not None and (match_id, away_team_id) in team_feature_lookup:
-            a_score, a_penalty = team_feature_lookup[(match_id, away_team_id)]
+            a_score, a_penalty, a_workload = team_feature_lookup[(match_id, away_team_id)]
         else:
             a_score = fallback_score(away_team_id, 'MID')
             a_penalty = 0.0
+            a_workload = 0.0
 
         home_scores.append(float(h_score))
         away_scores.append(float(a_score))
         home_absence.append(float(h_penalty))
         away_absence.append(float(a_penalty))
+        home_workload.append(float(h_workload))
+        away_workload.append(float(a_workload))
 
     out = match_meta[['MatchID']].copy()
     out['Home_PlayerBaseScore'] = home_scores
     out['Away_PlayerBaseScore'] = away_scores
     out['Home_PlayerAbsencePenalty'] = home_absence
     out['Away_PlayerAbsencePenalty'] = away_absence
+    out['Home_PlayerWorkload'] = home_workload
+    out['Away_PlayerWorkload'] = away_workload
     out['Player_BaseDiff'] = out['Home_PlayerBaseScore'] - out['Away_PlayerBaseScore']
     out['Player_AbsencePenaltyDiff'] = out['Away_PlayerAbsencePenalty'] - out['Home_PlayerAbsencePenalty']
+    # Positive means the away team carries more recent minutes, which favours home.
+    out['Player_WorkloadDiff'] = out['Away_PlayerWorkload'] - out['Home_PlayerWorkload']
     return out[result_cols]
 
 
@@ -930,7 +1055,8 @@ df = df.merge(player_base_feats, on='MatchID', how='left')
 for player_col in [
     'Home_PlayerBaseScore', 'Away_PlayerBaseScore',
     'Home_PlayerAbsencePenalty', 'Away_PlayerAbsencePenalty',
-    'Player_BaseDiff', 'Player_AbsencePenaltyDiff'
+    'Home_PlayerWorkload', 'Away_PlayerWorkload',
+    'Player_BaseDiff', 'Player_AbsencePenaltyDiff', 'Player_WorkloadDiff'
 ]:
     if player_col not in df.columns:
         df[player_col] = 0.0
@@ -960,7 +1086,7 @@ team_form_features = [
 
 h2h_base_features = H2H_COMBINED_FEATURES + H2H_VENUE_FEATURES
 h2h_count_features = ['H2H_Combined_MatchCount', 'H2H_Venue_MatchCount']
-player_base_input_features = ['Player_BaseDiff', 'Player_AbsencePenaltyDiff']
+player_base_input_features = ['Player_BaseDiff', 'Player_AbsencePenaltyDiff', 'Player_WorkloadDiff']
 outcome_prematch_features = team_form_features + h2h_base_features + h2h_count_features + player_base_input_features
 
 match_stats_features = [
@@ -1037,7 +1163,8 @@ WEATHER_CONTEXT_SPECS = [
 ]
 PLAYER_BASE_SIGNAL_SPECS = [
     {'weight_name': 'Player_FormDiff', 'column': 'Player_BaseDiff'},
-    {'weight_name': 'Player_AbsencePenaltyDiff', 'column': 'Player_AbsencePenaltyDiff'}
+    {'weight_name': 'Player_AbsencePenaltyDiff', 'column': 'Player_AbsencePenaltyDiff'},
+    {'weight_name': 'Player_WorkloadDiff', 'column': 'Player_WorkloadDiff'}
 ]
 BASE_MULTIPLIER_PARAMETER_NAMES = [
     'BaseMultiplier_General',
@@ -1108,6 +1235,67 @@ def first_non_null_value(values, default_value=float('nan')):
     return default_value
 
 
+def ensure_outcome_probability_metadata(df, mode_default='normal'):
+    if df is None or df.empty:
+        return df
+
+    if 'OutcomeProbabilityMode' not in df.columns:
+        df['OutcomeProbabilityMode'] = mode_default
+    df['OutcomeProbabilityMode'] = df['OutcomeProbabilityMode'].fillna(mode_default).astype(str)
+
+    for col, default_value in SCORE_PROBABILITY_PARAM_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default_value
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(default_value)
+
+    for col, default_value in DRAW_OVERLAY_PARAM_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default_value
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(default_value)
+
+    return df
+
+
+def filter_outcome_probability_config(
+    df,
+    outcome_mode,
+    score_total_scale,
+    score_rho,
+    score_alpha,
+    draw_overlay_alpha=None,
+    draw_overlay_min_prob=None,
+    draw_overlay_max_prob=None,
+    draw_overlay_goaldiff_scale=None,
+    draw_overlay_signal_scale=None,
+    draw_overlay_total_goals_cap=None
+):
+    if df is None or df.empty:
+        return df
+
+    filtered = ensure_outcome_probability_metadata(df.copy())
+    filtered = filtered[filtered['OutcomeProbabilityMode'] == outcome_mode].copy()
+    for col, target_value in [
+        ('ScoreProbabilityTotalScale', score_total_scale),
+        ('ScoreProbabilityRho', score_rho),
+        ('ScoreProbabilityAlpha', score_alpha),
+    ]:
+        values = pd.to_numeric(filtered[col], errors='coerce')
+        filtered = filtered[(values - float(target_value)).abs() <= 1e-12].copy()
+    if outcome_mode in DRAW_OVERLAY_OUTCOME_PROBABILITY_MODES:
+        for col, target_value in [
+            ('DrawOverlayAlpha', draw_overlay_alpha),
+            ('DrawOverlayMinProb', draw_overlay_min_prob),
+            ('DrawOverlayMaxProb', draw_overlay_max_prob),
+            ('DrawOverlayGoalDiffScale', draw_overlay_goaldiff_scale),
+            ('DrawOverlaySignalScale', draw_overlay_signal_scale),
+            ('DrawOverlayTotalGoalsCap', draw_overlay_total_goals_cap),
+        ]:
+            if target_value is not None:
+                values = pd.to_numeric(filtered[col], errors='coerce')
+                filtered = filtered[(values - float(target_value)).abs() <= 1e-12].copy()
+    return filtered
+
+
 def outcome_from_goals(home_goals, away_goals):
     if pd.isna(home_goals) or pd.isna(away_goals):
         return float('nan')
@@ -1127,7 +1315,10 @@ def prepare_run_summary(summary_df):
         'AvgNLL', 'Accuracy', 'Pred_AvgNLL', 'Pred_Accuracy',
         'ResolvedAvgNLL', 'ResolvedAccuracy',
         'MeanTopProb', 'MeanProbGap', 'MeanEntropy',
-        'MatchedReferenceCount', 'NumMatchesScored', 'H2H_K', 'BatchID'
+        'MatchedReferenceCount', 'NumMatchesScored', 'H2H_K', 'BatchID',
+        'ScoreProbabilityTotalScale', 'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+        'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+        'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale', 'DrawOverlayTotalGoalsCap'
     ]
     for col in numeric_cols:
         if col in prepared.columns:
@@ -1151,6 +1342,7 @@ def prepare_run_summary(summary_df):
 
 def append_to_run_history(history_path, summary_df):
     existing_mode_history = read_optional_csv(history_path)
+    new_summary = ensure_outcome_probability_metadata(summary_df.copy())
     if not existing_mode_history.empty and 'MatchStatsMode' not in existing_mode_history.columns:
         existing_mode_history['MatchStatsMode'] = 'actual'
     if not existing_mode_history.empty and 'PredictionSource' not in existing_mode_history.columns:
@@ -1162,15 +1354,27 @@ def append_to_run_history(history_path, summary_df):
             existing_mode_history['SourcePredictionMode'] = 'reference'
     if not existing_mode_history.empty and 'FeatureSchemaVersion' not in existing_mode_history.columns:
         existing_mode_history['FeatureSchemaVersion'] = 'legacy_v1'
+    existing_mode_history = ensure_outcome_probability_metadata(existing_mode_history)
 
     if existing_mode_history.empty:
-        history_updated = summary_df.copy()
+        history_updated = new_summary.copy()
     else:
         history_updated = pd.DataFrame.from_records(
-            existing_mode_history.to_dict('records') + summary_df.to_dict('records')
+            existing_mode_history.to_dict('records') + new_summary.to_dict('records')
         )
+        history_updated = ensure_outcome_probability_metadata(history_updated)
 
-    dedupe_cols = [col for col in ['PredictionSource', 'MatchStatsMode', 'FeatureSchemaVersion', 'BatchID', 'RunID'] if col in history_updated.columns]
+    dedupe_cols = [
+        col for col in [
+            'PredictionSource', 'MatchStatsMode', 'FeatureSchemaVersion',
+            'OutcomeProbabilityMode', 'ScoreProbabilityTotalScale',
+            'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+            'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+            'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale',
+            'DrawOverlayTotalGoalsCap', 'BatchID', 'RunID'
+        ]
+        if col in history_updated.columns
+    ]
     if dedupe_cols:
         history_updated = history_updated.drop_duplicates(subset=dedupe_cols, keep='last')
 
@@ -1224,15 +1428,23 @@ def append_future_vs_reference_metrics(metrics_path, summary_df):
             snapshot['EvalIsBestCombined'] = snapshot['EvalRank_Combined'] == best
 
     existing = read_optional_csv(metrics_path)
+    existing = ensure_outcome_probability_metadata(existing)
+    snapshot = ensure_outcome_probability_metadata(snapshot)
     if existing.empty:
         updated = snapshot
     else:
         updated = pd.concat([existing, snapshot], ignore_index=True, sort=False)
+        updated = ensure_outcome_probability_metadata(updated)
 
     dedupe_cols = [c for c in [
         'EvaluationTimestamp', 'EvaluationType',
         'PredictionSource', 'SourcePredictionMode', 'MatchStatsMode',
-        'FeatureSchemaVersion', 'BatchID', 'RunID'
+        'FeatureSchemaVersion', 'OutcomeProbabilityMode',
+        'ScoreProbabilityTotalScale', 'ScoreProbabilityRho',
+        'ScoreProbabilityAlpha', 'DrawOverlayAlpha', 'DrawOverlayMinProb',
+        'DrawOverlayMaxProb', 'DrawOverlayGoalDiffScale',
+        'DrawOverlaySignalScale', 'DrawOverlayTotalGoalsCap',
+        'BatchID', 'RunID'
     ] if c in updated.columns]
     if dedupe_cols:
         updated = updated.drop_duplicates(subset=dedupe_cols, keep='last')
@@ -1260,6 +1472,7 @@ def try_backfill_reference_from_future(ref_results):
         return pd.DataFrame(), pd.DataFrame()
 
     future_runs = future_runs.copy()
+    future_runs = ensure_outcome_probability_metadata(future_runs)
     future_runs['MatchID'] = pd.to_numeric(future_runs['MatchID'], errors='coerce')
     future_runs = future_runs.dropna(subset=['MatchID', 'RunID']).copy()
     if future_runs.empty:
@@ -1271,6 +1484,7 @@ def try_backfill_reference_from_future(ref_results):
         return pd.DataFrame(), pd.DataFrame()
 
     existing_pred = read_optional_csv(PREDICTION_OUT_PATH)
+    existing_pred = ensure_outcome_probability_metadata(existing_pred)
     if (not existing_pred.empty and 'PredictionSource' in existing_pred.columns
             and 'RunID' in existing_pred.columns and 'MatchID' in existing_pred.columns):
         existing_backfill = existing_pred[existing_pred['PredictionSource'] == 'future_backfill']
@@ -1279,8 +1493,19 @@ def try_backfill_reference_from_future(ref_results):
             # the same (RunID, MatchID) can mean two different runs across batches.
             # The comparison key uses every identity column present in both files.
             int_cols = ['BatchID', 'RunID', 'MatchID']
-            str_cols = ['FeatureSchemaVersion', 'MatchStatsMode']
-            key_cols = [c for c in int_cols + str_cols
+            float_cols = [
+                'ScoreProbabilityTotalScale',
+                'ScoreProbabilityRho',
+                'ScoreProbabilityAlpha',
+                'DrawOverlayAlpha',
+                'DrawOverlayMinProb',
+                'DrawOverlayMaxProb',
+                'DrawOverlayGoalDiffScale',
+                'DrawOverlaySignalScale',
+                'DrawOverlayTotalGoalsCap'
+            ]
+            str_cols = ['FeatureSchemaVersion', 'MatchStatsMode', 'OutcomeProbabilityMode']
+            key_cols = [c for c in int_cols + float_cols + str_cols
                         if c in matched_rows.columns and c in existing_backfill.columns]
             if 'RunID' in key_cols and 'MatchID' in key_cols:
                 def _key_set(df):
@@ -1288,6 +1513,8 @@ def try_backfill_reference_from_future(ref_results):
                     for c in key_cols:
                         if c in int_cols:
                             norm[c] = pd.to_numeric(df[c], errors='coerce').astype('Int64').astype(str)
+                        elif c in float_cols:
+                            norm[c] = pd.to_numeric(df[c], errors='coerce').round(12).astype(str)
                         else:
                             norm[c] = df[c].astype(str).fillna('')
                     return set(map(tuple, norm.itertuples(index=False, name=None)))
@@ -1300,15 +1527,37 @@ def try_backfill_reference_from_future(ref_results):
         matched_rows['MatchStatsMode'] = 'predicted'
     if 'PredictionMode' not in matched_rows.columns:
         matched_rows['PredictionMode'] = 'future'
+    matched_rows = ensure_outcome_probability_metadata(matched_rows)
 
     future_summary = read_optional_csv(FUTURE_RUN_SUMMARY_SOURCE_PATH)
-    summary_merge_cols = ['RunID']
-    for col in ['BatchID', 'Pred_AvgNLL', 'Pred_Accuracy', 'MeanTopProb', 'MeanProbGap', 'MeanEntropy', 'H2H_K']:
-        if col in future_summary.columns and col not in matched_rows.columns:
+    future_summary = ensure_outcome_probability_metadata(future_summary)
+    run_identity_cols = [
+        c for c in [
+            'BatchID', 'RunID', 'FeatureSchemaVersion', 'MatchStatsMode',
+            'OutcomeProbabilityMode', 'ScoreProbabilityTotalScale',
+            'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+            'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+            'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale',
+            'DrawOverlayTotalGoalsCap'
+        ]
+        if c in matched_rows.columns and c in future_summary.columns
+    ]
+    if 'RunID' not in run_identity_cols:
+        run_identity_cols = ['RunID']
+    summary_merge_cols = list(run_identity_cols)
+    for col in [
+        'BatchID', 'Pred_AvgNLL', 'Pred_Accuracy', 'MeanTopProb',
+        'MeanProbGap', 'MeanEntropy', 'H2H_K', 'OutcomeProbabilityMode',
+        'ScoreProbabilityTotalScale', 'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+        'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+        'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale',
+        'DrawOverlayTotalGoalsCap'
+    ]:
+        if col in future_summary.columns and col not in matched_rows.columns and col not in summary_merge_cols:
             summary_merge_cols.append(col)
-    if len(summary_merge_cols) > 1:
-        summary_meta = future_summary[summary_merge_cols].drop_duplicates(subset=['RunID'], keep='last')
-        matched_rows = matched_rows.merge(summary_meta, on='RunID', how='left')
+    if len(summary_merge_cols) > len(run_identity_cols):
+        summary_meta = future_summary[summary_merge_cols].drop_duplicates(subset=run_identity_cols, keep='last')
+        matched_rows = matched_rows.merge(summary_meta, on=run_identity_cols, how='left')
 
     ref_actual = ref_results[['HomeGoals', 'AwayGoals', 'Result']].rename(columns={
         'HomeGoals': 'ActualHomeGoals',
@@ -1319,13 +1568,68 @@ def try_backfill_reference_from_future(ref_results):
     scored_runs = []
     summary_rows = []
 
-    for run_id, run_df in matched_rows.groupby('RunID', sort=True):
+    run_group_cols = [
+        c for c in [
+            'BatchID', 'RunID', 'FeatureSchemaVersion', 'MatchStatsMode',
+            'OutcomeProbabilityMode', 'ScoreProbabilityTotalScale',
+            'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+            'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+            'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale',
+            'DrawOverlayTotalGoalsCap'
+        ]
+        if c in matched_rows.columns
+    ]
+    if 'RunID' not in run_group_cols:
+        run_group_cols = ['RunID']
+
+    for _, run_df in matched_rows.groupby(run_group_cols, sort=True, dropna=False):
         scored = run_df.copy()
+        run_id = first_non_null_value(scored['RunID'].tolist(), 1)
         source_prediction_mode = first_non_null_value(scored['PredictionMode'].tolist(), 'future')
         match_stats_mode = first_non_null_value(scored['MatchStatsMode'].tolist(), 'predicted')
         feature_schema_version = first_non_null_value(
             scored['FeatureSchemaVersion'].tolist() if 'FeatureSchemaVersion' in scored.columns else [],
             FEATURE_SCHEMA_VERSION
+        )
+        outcome_probability_mode = first_non_null_value(
+            scored['OutcomeProbabilityMode'].tolist() if 'OutcomeProbabilityMode' in scored.columns else [],
+            'normal'
+        )
+        score_probability_total_scale = first_non_null_value(
+            scored['ScoreProbabilityTotalScale'].tolist() if 'ScoreProbabilityTotalScale' in scored.columns else [],
+            SCORE_PROBABILITY_PARAM_DEFAULTS['ScoreProbabilityTotalScale']
+        )
+        score_probability_rho = first_non_null_value(
+            scored['ScoreProbabilityRho'].tolist() if 'ScoreProbabilityRho' in scored.columns else [],
+            SCORE_PROBABILITY_PARAM_DEFAULTS['ScoreProbabilityRho']
+        )
+        score_probability_alpha = first_non_null_value(
+            scored['ScoreProbabilityAlpha'].tolist() if 'ScoreProbabilityAlpha' in scored.columns else [],
+            SCORE_PROBABILITY_PARAM_DEFAULTS['ScoreProbabilityAlpha']
+        )
+        draw_overlay_alpha = first_non_null_value(
+            scored['DrawOverlayAlpha'].tolist() if 'DrawOverlayAlpha' in scored.columns else [],
+            DRAW_OVERLAY_PARAM_DEFAULTS['DrawOverlayAlpha']
+        )
+        draw_overlay_min_prob = first_non_null_value(
+            scored['DrawOverlayMinProb'].tolist() if 'DrawOverlayMinProb' in scored.columns else [],
+            DRAW_OVERLAY_PARAM_DEFAULTS['DrawOverlayMinProb']
+        )
+        draw_overlay_max_prob = first_non_null_value(
+            scored['DrawOverlayMaxProb'].tolist() if 'DrawOverlayMaxProb' in scored.columns else [],
+            DRAW_OVERLAY_PARAM_DEFAULTS['DrawOverlayMaxProb']
+        )
+        draw_overlay_goaldiff_scale = first_non_null_value(
+            scored['DrawOverlayGoalDiffScale'].tolist() if 'DrawOverlayGoalDiffScale' in scored.columns else [],
+            DRAW_OVERLAY_PARAM_DEFAULTS['DrawOverlayGoalDiffScale']
+        )
+        draw_overlay_signal_scale = first_non_null_value(
+            scored['DrawOverlaySignalScale'].tolist() if 'DrawOverlaySignalScale' in scored.columns else [],
+            DRAW_OVERLAY_PARAM_DEFAULTS['DrawOverlaySignalScale']
+        )
+        draw_overlay_total_goals_cap = first_non_null_value(
+            scored['DrawOverlayTotalGoalsCap'].tolist() if 'DrawOverlayTotalGoalsCap' in scored.columns else [],
+            DRAW_OVERLAY_PARAM_DEFAULTS['DrawOverlayTotalGoalsCap']
         )
         batch_id = first_non_null_value(scored['BatchID'].tolist() if 'BatchID' in scored.columns else [], 1)
         h2h_k = first_non_null_value(scored['H2H_K'].tolist() if 'H2H_K' in scored.columns else [], H2H_K_DEFAULT)
@@ -1405,6 +1709,16 @@ def try_backfill_reference_from_future(ref_results):
         scored['PredictionSource'] = 'future_backfill'
         scored['MatchStatsMode'] = match_stats_mode
         scored['FeatureSchemaVersion'] = feature_schema_version
+        scored['OutcomeProbabilityMode'] = outcome_probability_mode
+        scored['ScoreProbabilityTotalScale'] = score_probability_total_scale
+        scored['ScoreProbabilityRho'] = score_probability_rho
+        scored['ScoreProbabilityAlpha'] = score_probability_alpha
+        scored['DrawOverlayAlpha'] = draw_overlay_alpha
+        scored['DrawOverlayMinProb'] = draw_overlay_min_prob
+        scored['DrawOverlayMaxProb'] = draw_overlay_max_prob
+        scored['DrawOverlayGoalDiffScale'] = draw_overlay_goaldiff_scale
+        scored['DrawOverlaySignalScale'] = draw_overlay_signal_scale
+        scored['DrawOverlayTotalGoalsCap'] = draw_overlay_total_goals_cap
         scored['RunResolvedAvgNLL'] = resolved_run_nll
         scored['RunResolvedAccuracy'] = resolved_run_accuracy
         scored['RunMetricSource'] = metric_source
@@ -1421,6 +1735,16 @@ def try_backfill_reference_from_future(ref_results):
             'SourcePredictionMode': source_prediction_mode,
             'MatchStatsMode': match_stats_mode,
             'FeatureSchemaVersion': feature_schema_version,
+            'OutcomeProbabilityMode': outcome_probability_mode,
+            'ScoreProbabilityTotalScale': score_probability_total_scale,
+            'ScoreProbabilityRho': score_probability_rho,
+            'ScoreProbabilityAlpha': score_probability_alpha,
+            'DrawOverlayAlpha': draw_overlay_alpha,
+            'DrawOverlayMinProb': draw_overlay_min_prob,
+            'DrawOverlayMaxProb': draw_overlay_max_prob,
+            'DrawOverlayGoalDiffScale': draw_overlay_goaldiff_scale,
+            'DrawOverlaySignalScale': draw_overlay_signal_scale,
+            'DrawOverlayTotalGoalsCap': draw_overlay_total_goals_cap,
             'H2H_K': h2h_k,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
@@ -1799,6 +2123,313 @@ def estimate_scoreline(match_row, predicted_goal_diff, predicted_result):
         int(pred_away_goals)
     )
 
+
+def poisson_goal_pmf(lam, max_goals):
+    lam = max(0.02, min(8.0, float(lam)))
+    probs = [math.exp(-lam)]
+    for goals in range(1, max_goals + 1):
+        probs.append(probs[-1] * lam / float(goals))
+    return probs
+
+
+def score_distribution_outcome_probs(expected_home_goals, expected_away_goals, mode):
+    max_goals = SCORE_PROBABILITY_MAX_GOALS
+    lam_home = max(0.02, float(expected_home_goals) * SCORE_PROBABILITY_TOTAL_SCALE)
+    lam_away = max(0.02, float(expected_away_goals) * SCORE_PROBABILITY_TOTAL_SCALE)
+    home_pmf = poisson_goal_pmf(lam_home, max_goals)
+    away_pmf = poisson_goal_pmf(lam_away, max_goals)
+    rho = SCORE_PROBABILITY_RHO if 'dixon_coles' in mode else 0.0
+
+    p_home = 0.0
+    p_draw = 0.0
+    p_away = 0.0
+    for home_goals, home_prob in enumerate(home_pmf):
+        for away_goals, away_prob in enumerate(away_pmf):
+            joint = home_prob * away_prob
+            if rho:
+                if home_goals == 0 and away_goals == 0:
+                    joint *= max(1e-12, 1.0 - lam_home * lam_away * rho)
+                elif home_goals == 0 and away_goals == 1:
+                    joint *= max(1e-12, 1.0 + lam_home * rho)
+                elif home_goals == 1 and away_goals == 0:
+                    joint *= max(1e-12, 1.0 + lam_away * rho)
+                elif home_goals == 1 and away_goals == 1:
+                    joint *= max(1e-12, 1.0 - rho)
+
+            if home_goals > away_goals:
+                p_home += joint
+            elif home_goals == away_goals:
+                p_draw += joint
+            else:
+                p_away += joint
+
+    total = p_home + p_draw + p_away
+    if not math.isfinite(total) or total <= 0:
+        return float('nan'), float('nan'), float('nan')
+    return p_home / total, p_draw / total, p_away / total
+
+
+def blend_outcome_probabilities(base_h, base_d, base_a, score_h, score_d, score_a, mode):
+    if any(not math.isfinite(v) for v in [score_h, score_d, score_a]):
+        return base_h, base_d, base_a
+
+    if mode.endswith('_draw_ratio'):
+        base_non_draw = base_h + base_a
+        home_share = base_h / base_non_draw if base_non_draw > 0 else 0.5
+        candidate_d = score_d
+        candidate_h = (1.0 - candidate_d) * home_share
+        candidate_a = (1.0 - candidate_d) * (1.0 - home_share)
+    else:
+        candidate_h, candidate_d, candidate_a = score_h, score_d, score_a
+
+    alpha = SCORE_PROBABILITY_ALPHA
+    p_h = (1.0 - alpha) * base_h + alpha * candidate_h
+    p_d = (1.0 - alpha) * base_d + alpha * candidate_d
+    p_a = (1.0 - alpha) * base_a + alpha * candidate_a
+    total = p_h + p_d + p_a
+    if not math.isfinite(total) or total <= 0:
+        return base_h, base_d, base_a
+    return p_h / total, p_d / total, p_a / total
+
+
+def apply_score_distribution_probabilities(pred_df):
+    if OUTCOME_PROBABILITY_MODE not in SCORE_OUTCOME_PROBABILITY_MODES:
+        return pred_df
+
+    adjusted = pred_df.copy()
+    for idx, row in adjusted.iterrows():
+        score_h, score_d, score_a = score_distribution_outcome_probs(
+            row['ExpectedHomeGoals'],
+            row['ExpectedAwayGoals'],
+            OUTCOME_PROBABILITY_MODE
+        )
+        p_h, p_d, p_a = blend_outcome_probabilities(
+            float(row['WinProb']),
+            float(row['DrawProb']),
+            float(row['LoseProb']),
+            score_h,
+            score_d,
+            score_a,
+            OUTCOME_PROBABILITY_MODE
+        )
+        adjusted.at[idx, 'WinProb'] = p_h
+        adjusted.at[idx, 'DrawProb'] = p_d
+        adjusted.at[idx, 'LoseProb'] = p_a
+        adjusted.at[idx, 'ScoreDist_WinProb'] = score_h
+        adjusted.at[idx, 'ScoreDist_DrawProb'] = score_d
+        adjusted.at[idx, 'ScoreDist_LoseProb'] = score_a
+
+    adjusted['PredictedResult'] = adjusted[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
+    adjusted['PredictedResult'] = adjusted['PredictedResult'].map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
+    return adjusted
+
+
+def draw_overlay_float(value, default_value=float('nan')):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return float(default_value)
+    if not math.isfinite(num):
+        return float(default_value)
+    return num
+
+
+def draw_overlay_clamp(value, low=0.0, high=1.0):
+    num = draw_overlay_float(value, low)
+    return max(float(low), min(float(high), num))
+
+
+def draw_overlay_similarity(value, scale):
+    scale_value = max(0.05, draw_overlay_float(scale, 1.0))
+    return math.exp(-abs(draw_overlay_float(value, 0.0)) / scale_value)
+
+
+def draw_overlay_weighted_mean(parts, default_value=0.5):
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for value, weight in parts:
+        if value is None:
+            continue
+        value = draw_overlay_float(value)
+        weight = draw_overlay_float(weight, 0.0)
+        if math.isfinite(value) and weight > 0:
+            weighted_sum += value * weight
+            total_weight += weight
+    if total_weight <= 0:
+        return float(default_value)
+    return draw_overlay_clamp(weighted_sum / total_weight)
+
+
+def draw_overlay_pair_similarity(row, home_col, away_col, scale):
+    home_value = row.get(home_col, float('nan'))
+    away_value = row.get(away_col, float('nan'))
+    if pd.isna(home_value) or pd.isna(away_value):
+        return None
+    return draw_overlay_similarity(
+        draw_overlay_float(home_value, 0.0) - draw_overlay_float(away_value, 0.0),
+        scale
+    )
+
+
+def draw_overlay_signal_scales(pred_df):
+    scales = {}
+    for col in BASE_SIGNAL_FEATURES:
+        if col not in pred_df.columns:
+            continue
+        values = pd.to_numeric(pred_df[col], errors='coerce').abs().dropna()
+        median_abs = float(values.median()) if not values.empty else DRAW_OVERLAY_SIGNAL_SCALE
+        scales[col] = max(0.05, DRAW_OVERLAY_SIGNAL_SCALE, median_abs)
+    return scales
+
+
+def draw_overlay_strength_layer(row, signal_scales):
+    parts = [
+        (
+            draw_overlay_similarity(row.get('PredictedGoalDiff', 0.0), DRAW_OVERLAY_GOALDIFF_SCALE),
+            0.50
+        )
+    ]
+    for col, weight in [
+        ('General_BaseSignal', 0.25),
+        ('H2H_BaseSignal', 0.15),
+        ('Player_BaseSignal', 0.10),
+    ]:
+        if col in row.index:
+            parts.append((
+                draw_overlay_similarity(row.get(col, 0.0), signal_scales.get(col, DRAW_OVERLAY_SIGNAL_SCALE)),
+                weight
+            ))
+    return draw_overlay_weighted_mean(parts, default_value=0.5)
+
+
+def draw_overlay_score_layer(row):
+    home_goals = draw_overlay_float(row.get('ExpectedHomeGoals'))
+    away_goals = draw_overlay_float(row.get('ExpectedAwayGoals'))
+    if not math.isfinite(home_goals) or not math.isfinite(away_goals):
+        return draw_overlay_similarity(row.get('PredictedGoalDiff', 0.0), DRAW_OVERLAY_GOALDIFF_SCALE)
+
+    goal_gap_similarity = draw_overlay_similarity(home_goals - away_goals, 0.75)
+    total_goals = max(0.0, home_goals + away_goals)
+    high_total_penalty = math.exp(-max(0.0, total_goals - DRAW_OVERLAY_TOTAL_GOALS_CAP) / 1.10)
+    return draw_overlay_weighted_mean([
+        (goal_gap_similarity, 0.70),
+        (high_total_penalty, 0.30)
+    ])
+
+
+def draw_overlay_stats_layer(row):
+    return draw_overlay_weighted_mean([
+        (draw_overlay_pair_similarity(row, 'HomeXG', 'AwayXG', 0.80), 0.25),
+        (draw_overlay_pair_similarity(row, 'HomeShotsOnTarget', 'AwayShotsOnTarget', 2.25), 0.20),
+        (draw_overlay_pair_similarity(row, 'HomeShots', 'AwayShots', 6.00), 0.15),
+        (draw_overlay_pair_similarity(row, 'HomePossession', 'AwayPossession', 12.00), 0.15),
+        (draw_overlay_pair_similarity(row, 'HomePassAccuracy', 'AwayPassAccuracy', 8.00), 0.10),
+        (draw_overlay_pair_similarity(row, 'HomeCorners', 'AwayCorners', 4.00), 0.10),
+        (draw_overlay_pair_similarity(row, 'HomePasses', 'AwayPasses', 120.00), 0.05),
+    ])
+
+
+def draw_overlay_discipline_layer(row):
+    balance_layer = draw_overlay_weighted_mean([
+        (draw_overlay_pair_similarity(row, 'HomeFouls', 'AwayFouls', 6.00), 0.55),
+        (draw_overlay_pair_similarity(row, 'HomeYellowCard', 'AwayYellowCard', 2.00), 0.30),
+        (draw_overlay_pair_similarity(row, 'HomeRedCard', 'AwayRedCard', 0.75), 0.15),
+    ])
+
+    load_parts = [
+        row.get('HomeFouls', float('nan')),
+        row.get('AwayFouls', float('nan')),
+        1.5 * draw_overlay_float(row.get('HomeYellowCard'), 0.0),
+        1.5 * draw_overlay_float(row.get('AwayYellowCard'), 0.0),
+        5.0 * draw_overlay_float(row.get('HomeRedCard'), 0.0),
+        5.0 * draw_overlay_float(row.get('AwayRedCard'), 0.0),
+    ]
+    if any(pd.isna(v) for v in load_parts[:2]):
+        load_layer = None
+    else:
+        discipline_load = sum(draw_overlay_float(v, 0.0) for v in load_parts)
+        load_layer = draw_overlay_clamp((discipline_load - 20.0) / 18.0)
+
+    return draw_overlay_weighted_mean([
+        (balance_layer, 0.70),
+        (load_layer, 0.30)
+    ])
+
+
+def draw_overlay_candidate(row, signal_scales):
+    strength_layer = draw_overlay_strength_layer(row, signal_scales)
+    score_layer = draw_overlay_score_layer(row)
+    stats_layer = draw_overlay_stats_layer(row)
+    discipline_layer = draw_overlay_discipline_layer(row)
+    support_layer = draw_overlay_weighted_mean([
+        (score_layer, 0.35),
+        (stats_layer, 0.45),
+        (discipline_layer, 0.20)
+    ])
+    draw_signal = draw_overlay_clamp(strength_layer * (0.65 + 0.35 * support_layer))
+    candidate_prob = (
+        DRAW_OVERLAY_MIN_PROB
+        + (DRAW_OVERLAY_MAX_PROB - DRAW_OVERLAY_MIN_PROB) * draw_signal
+    )
+    return {
+        'DrawOverlay_StrengthLayer': strength_layer,
+        'DrawOverlay_ScoreLayer': score_layer,
+        'DrawOverlay_StatsLayer': stats_layer,
+        'DrawOverlay_DisciplineLayer': discipline_layer,
+        'DrawOverlay_SupportLayer': support_layer,
+        'DrawOverlay_Signal': draw_signal,
+        'DrawOverlay_CandidateDrawProb': draw_overlay_clamp(candidate_prob)
+    }
+
+
+def apply_draw_multilayer_overlay(pred_df):
+    if OUTCOME_PROBABILITY_MODE not in DRAW_OVERLAY_OUTCOME_PROBABILITY_MODES:
+        return pred_df
+
+    adjusted = pred_df.copy()
+    signal_scales = draw_overlay_signal_scales(adjusted)
+    for idx, row in adjusted.iterrows():
+        base_h = draw_overlay_float(row.get('WinProb'))
+        base_d = draw_overlay_float(row.get('DrawProb'))
+        base_a = draw_overlay_float(row.get('LoseProb'))
+        base_total = base_h + base_d + base_a
+        if not math.isfinite(base_total) or base_total <= 0:
+            continue
+
+        base_h /= base_total
+        base_d /= base_total
+        base_a /= base_total
+        layers = draw_overlay_candidate(row, signal_scales)
+        candidate_d = layers['DrawOverlay_CandidateDrawProb']
+        target_d = max(base_d, candidate_d)
+        final_d = base_d + DRAW_OVERLAY_ALPHA * (target_d - base_d)
+        final_d = draw_overlay_clamp(final_d)
+        base_non_draw = base_h + base_a
+        home_share = base_h / base_non_draw if base_non_draw > 0 else 0.5
+        final_h = (1.0 - final_d) * home_share
+        final_a = (1.0 - final_d) * (1.0 - home_share)
+
+        adjusted.at[idx, 'WinProb'] = final_h
+        adjusted.at[idx, 'DrawProb'] = final_d
+        adjusted.at[idx, 'LoseProb'] = final_a
+        adjusted.at[idx, 'DrawOverlay_BaseDrawProb'] = base_d
+        adjusted.at[idx, 'DrawOverlay_FinalDrawProb'] = final_d
+        adjusted.at[idx, 'DrawOverlay_Lift'] = final_d - base_d
+        for col, value in layers.items():
+            adjusted.at[idx, col] = value
+
+    adjusted['PredictedResult'] = adjusted[['WinProb', 'DrawProb', 'LoseProb']].idxmax(axis=1)
+    adjusted['PredictedResult'] = adjusted['PredictedResult'].map({'WinProb': 'H', 'DrawProb': 'D', 'LoseProb': 'A'})
+    return adjusted
+
+
+def apply_outcome_probability_adjustment(pred_df):
+    if OUTCOME_PROBABILITY_MODE in SCORE_OUTCOME_PROBABILITY_MODES:
+        return apply_score_distribution_probabilities(pred_df)
+    if OUTCOME_PROBABILITY_MODE in DRAW_OVERLAY_OUTCOME_PROBABILITY_MODES:
+        return apply_draw_multilayer_overlay(pred_df)
+    return pred_df
+
 def compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy'):
     base = df.dropna(subset=[nll_col, acc_col]).copy()
     if base.empty:
@@ -2119,8 +2750,19 @@ def migrate_legacy_history_to_hybrid(history_df, target_schema_version):
             hist['SourcePredictionMode'] = hist['PredictionMode']
         else:
             hist['SourcePredictionMode'] = 'reference'
+    hist = ensure_outcome_probability_metadata(hist)
 
-    key_cols = [c for c in ['PredictionSource', 'MatchStatsMode', 'SourcePredictionMode', 'BatchID', 'RunID'] if c in hist.columns]
+    key_cols = [
+        c for c in [
+            'PredictionSource', 'MatchStatsMode', 'SourcePredictionMode',
+            'OutcomeProbabilityMode', 'ScoreProbabilityTotalScale',
+            'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+            'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+            'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale',
+            'DrawOverlayTotalGoalsCap', 'BatchID', 'RunID'
+        ]
+        if c in hist.columns
+    ]
     if not key_cols:
         return hist, 0
 
@@ -2165,6 +2807,11 @@ def migrate_legacy_history_to_hybrid(history_df, target_schema_version):
 
         migrated = row.copy()
         migrated['FeatureSchemaVersion'] = target_schema_version
+        migrated['OutcomeProbabilityMode'] = row.get('OutcomeProbabilityMode', 'normal')
+        for col, default_value in SCORE_PROBABILITY_PARAM_DEFAULTS.items():
+            migrated[col] = row.get(col, default_value)
+        for col, default_value in DRAW_OVERLAY_PARAM_DEFAULTS.items():
+            migrated[col] = row.get(col, default_value)
 
         legacy_weight_cols = [
             c for c in migrated.index
@@ -2251,7 +2898,17 @@ def migrate_legacy_history_to_hybrid(history_df, target_schema_version):
 
     migrated_df = pd.DataFrame(migrated_rows)
     updated = pd.concat([hist, migrated_df], ignore_index=True, sort=False)
-    dedupe_cols = [c for c in ['PredictionSource', 'MatchStatsMode', 'FeatureSchemaVersion', 'BatchID', 'RunID'] if c in updated.columns]
+    dedupe_cols = [
+        c for c in [
+            'PredictionSource', 'MatchStatsMode', 'FeatureSchemaVersion',
+            'OutcomeProbabilityMode', 'ScoreProbabilityTotalScale',
+            'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+            'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+            'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale',
+            'DrawOverlayTotalGoalsCap', 'BatchID', 'RunID'
+        ]
+        if c in updated.columns
+    ]
     if dedupe_cols:
         updated = updated.drop_duplicates(subset=dedupe_cols, keep='last')
     return updated, len(migrated_rows)
@@ -2260,6 +2917,12 @@ def migrate_legacy_history_to_hybrid(history_df, target_schema_version):
 def ensure_migrated_history_schema(history_path, target_schema_version):
     existing = read_optional_csv(history_path)
     if existing.empty:
+        return 0
+
+    # Workload changes the actual feature values and therefore the NLL surface.
+    # Older runs cannot be relabelled as v3 without recomputing their predictions;
+    # doing so would train the surrogate on targets generated by another model.
+    if target_schema_version != 'bases_v2_hybrid':
         return 0
 
     if 'MatchStatsMode' not in existing.columns:
@@ -2273,6 +2936,7 @@ def ensure_migrated_history_schema(history_path, target_schema_version):
             existing['SourcePredictionMode'] = 'reference'
     if 'FeatureSchemaVersion' not in existing.columns:
         existing['FeatureSchemaVersion'] = 'legacy_v1'
+    existing = ensure_outcome_probability_metadata(existing)
 
     migrated_history, migrated_count = migrate_legacy_history_to_hybrid(existing, target_schema_version)
     if migrated_count > 0:
@@ -2280,7 +2944,23 @@ def ensure_migrated_history_schema(history_path, target_schema_version):
     return migrated_count
 
 
-def load_run_history(path, weight_cols, match_stats_mode, source_prediction_mode=None, feature_schema_version=None):
+def load_run_history(
+    path,
+    weight_cols,
+    match_stats_mode,
+    source_prediction_mode=None,
+    feature_schema_version=None,
+    outcome_probability_mode=None,
+    score_probability_total_scale=None,
+    score_probability_rho=None,
+    score_probability_alpha=None,
+    draw_overlay_alpha=None,
+    draw_overlay_min_prob=None,
+    draw_overlay_max_prob=None,
+    draw_overlay_goaldiff_scale=None,
+    draw_overlay_signal_scale=None,
+    draw_overlay_total_goals_cap=None
+):
     if not os.path.exists(path):
         return pd.DataFrame()
     try:
@@ -2296,12 +2976,35 @@ def load_run_history(path, weight_cols, match_stats_mode, source_prediction_mode
             hist['SourcePredictionMode'] = 'reference'
     if 'FeatureSchemaVersion' not in hist.columns:
         hist['FeatureSchemaVersion'] = 'legacy_v1'
+    hist = ensure_outcome_probability_metadata(hist)
 
     hist = hist[hist['MatchStatsMode'] == match_stats_mode].copy()
     if source_prediction_mode is not None:
         hist = hist[hist['SourcePredictionMode'] == source_prediction_mode].copy()
     if feature_schema_version is not None:
         hist = hist[hist['FeatureSchemaVersion'] == feature_schema_version].copy()
+    if outcome_probability_mode is not None:
+        hist = hist[hist['OutcomeProbabilityMode'] == outcome_probability_mode].copy()
+    for col, target_value in [
+        ('ScoreProbabilityTotalScale', score_probability_total_scale),
+        ('ScoreProbabilityRho', score_probability_rho),
+        ('ScoreProbabilityAlpha', score_probability_alpha),
+    ]:
+        if target_value is not None:
+            values = pd.to_numeric(hist[col], errors='coerce')
+            hist = hist[(values - float(target_value)).abs() <= 1e-12].copy()
+    if outcome_probability_mode in DRAW_OVERLAY_OUTCOME_PROBABILITY_MODES:
+        for col, target_value in [
+            ('DrawOverlayAlpha', draw_overlay_alpha),
+            ('DrawOverlayMinProb', draw_overlay_min_prob),
+            ('DrawOverlayMaxProb', draw_overlay_max_prob),
+            ('DrawOverlayGoalDiffScale', draw_overlay_goaldiff_scale),
+            ('DrawOverlaySignalScale', draw_overlay_signal_scale),
+            ('DrawOverlayTotalGoalsCap', draw_overlay_total_goals_cap),
+        ]:
+            if target_value is not None:
+                values = pd.to_numeric(hist[col], errors='coerce')
+                hist = hist[(values - float(target_value)).abs() <= 1e-12].copy()
     if hist.empty:
         return hist
 
@@ -2372,6 +3075,12 @@ def select_candidates_with_surrogate(candidates_df, pred_nll, pred_acc, max_runs
 ref_results = load_reference_results(RESULTS_PATH, FALLBACK_RESULTS_PATH)
 print(f"Prediction mode: {PREDICTION_MODE}")
 print(f"Match stats mode: {MATCH_STATS_MODE}")
+print(
+    "Outcome probability mode: "
+    f"{OUTCOME_PROBABILITY_MODE} "
+    f"(scale={SCORE_PROBABILITY_TOTAL_SCALE}, rho={SCORE_PROBABILITY_RHO}, alpha={SCORE_PROBABILITY_ALPHA}, "
+    f"draw_alpha={DRAW_OVERLAY_ALPHA}, draw_max={DRAW_OVERLAY_MAX_PROB})"
+)
 print(f"Output path: {OUTPUT_PATH}")
 print(f"Surrogate history source: {RUN_HISTORY_SOURCE_PATH}")
 
@@ -2429,6 +3138,19 @@ if PREDICTION_MODE == 'reference':
             current_mode_history = history_updated.copy()
         if 'FeatureSchemaVersion' in current_mode_history.columns:
             current_mode_history = current_mode_history[current_mode_history['FeatureSchemaVersion'] == FEATURE_SCHEMA_VERSION].copy()
+        current_mode_history = filter_outcome_probability_config(
+            current_mode_history,
+            OUTCOME_PROBABILITY_MODE,
+            SCORE_PROBABILITY_TOTAL_SCALE,
+            SCORE_PROBABILITY_RHO,
+            SCORE_PROBABILITY_ALPHA,
+            DRAW_OVERLAY_ALPHA,
+            DRAW_OVERLAY_MIN_PROB,
+            DRAW_OVERLAY_MAX_PROB,
+            DRAW_OVERLAY_GOALDIFF_SCALE,
+            DRAW_OVERLAY_SIGNAL_SCALE,
+            DRAW_OVERLAY_TOTAL_GOALS_CAP
+        )
 
         decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
         decision_df = persist_decision_table(decision_df, PARETO_OUT_PATH)
@@ -2530,7 +3252,17 @@ else:
         weight_cols,
         MATCH_STATS_MODE,
         PREDICTION_MODE,
-        FEATURE_SCHEMA_VERSION
+        FEATURE_SCHEMA_VERSION,
+        OUTCOME_PROBABILITY_MODE,
+        SCORE_PROBABILITY_TOTAL_SCALE,
+        SCORE_PROBABILITY_RHO,
+        SCORE_PROBABILITY_ALPHA,
+        DRAW_OVERLAY_ALPHA,
+        DRAW_OVERLAY_MIN_PROB,
+        DRAW_OVERLAY_MAX_PROB,
+        DRAW_OVERLAY_GOALDIFF_SCALE,
+        DRAW_OVERLAY_SIGNAL_SCALE,
+        DRAW_OVERLAY_TOTAL_GOALS_CAP
     )
     use_surrogate = len(history_df) >= SURROGATE_MIN_HISTORY
 
@@ -2638,6 +3370,16 @@ else:
         pred_df['SourcePredictionMode'] = PREDICTION_MODE
         pred_df['MatchStatsMode'] = MATCH_STATS_MODE
         pred_df['FeatureSchemaVersion'] = FEATURE_SCHEMA_VERSION
+        pred_df['OutcomeProbabilityMode'] = OUTCOME_PROBABILITY_MODE
+        pred_df['ScoreProbabilityTotalScale'] = SCORE_PROBABILITY_TOTAL_SCALE
+        pred_df['ScoreProbabilityRho'] = SCORE_PROBABILITY_RHO
+        pred_df['ScoreProbabilityAlpha'] = SCORE_PROBABILITY_ALPHA
+        pred_df['DrawOverlayAlpha'] = DRAW_OVERLAY_ALPHA
+        pred_df['DrawOverlayMinProb'] = DRAW_OVERLAY_MIN_PROB
+        pred_df['DrawOverlayMaxProb'] = DRAW_OVERLAY_MAX_PROB
+        pred_df['DrawOverlayGoalDiffScale'] = DRAW_OVERLAY_GOALDIFF_SCALE
+        pred_df['DrawOverlaySignalScale'] = DRAW_OVERLAY_SIGNAL_SCALE
+        pred_df['DrawOverlayTotalGoalsCap'] = DRAW_OVERLAY_TOTAL_GOALS_CAP
         pred_df['WinProb'] = win_probs
         pred_df['DrawProb'] = draw_probs
         pred_df['LoseProb'] = lose_probs
@@ -2653,6 +3395,10 @@ else:
         for base_col in BASE_SIGNAL_FEATURES:
             if base_col in X_pred_w.columns:
                 pred_df[base_col] = X_pred_w[base_col].values
+        if MATCH_STATS_MODE != 'off':
+            for stat_col in match_stats_features:
+                if stat_col in predict_df.columns:
+                    pred_df[stat_col] = predict_df[stat_col].values
 
         score_estimates = [
             estimate_scoreline(predict_df.loc[idx], pred_df.at[idx, 'PredictedGoalDiff'], pred_df.at[idx, 'PredictedResult'])
@@ -2667,6 +3413,22 @@ else:
             + '-'
             + pred_df['PredictedAwayGoals'].astype(int).astype(str)
         )
+
+        if OUTCOME_PROBABILITY_MODE != 'normal':
+            pred_df = apply_outcome_probability_adjustment(pred_df)
+            score_estimates = [
+                estimate_scoreline(predict_df.loc[idx], pred_df.at[idx, 'PredictedGoalDiff'], pred_df.at[idx, 'PredictedResult'])
+                for idx in pred_df.index
+            ]
+            pred_df['ExpectedHomeGoals'] = [row[0] for row in score_estimates]
+            pred_df['ExpectedAwayGoals'] = [row[1] for row in score_estimates]
+            pred_df['PredictedHomeGoals'] = [row[2] for row in score_estimates]
+            pred_df['PredictedAwayGoals'] = [row[3] for row in score_estimates]
+            pred_df['PredictedScoreline'] = (
+                pred_df['PredictedHomeGoals'].astype(int).astype(str)
+                + '-'
+                + pred_df['PredictedAwayGoals'].astype(int).astype(str)
+            )
 
         if 'H2H_Combined_MatchCount' in predict_df.columns:
             pred_df['H2H_Combined_MatchCount'] = predict_df['H2H_Combined_MatchCount'].values
@@ -2794,6 +3556,16 @@ else:
             'SourcePredictionMode': PREDICTION_MODE,
             'MatchStatsMode': MATCH_STATS_MODE,
             'FeatureSchemaVersion': FEATURE_SCHEMA_VERSION,
+            'OutcomeProbabilityMode': OUTCOME_PROBABILITY_MODE,
+            'ScoreProbabilityTotalScale': SCORE_PROBABILITY_TOTAL_SCALE,
+            'ScoreProbabilityRho': SCORE_PROBABILITY_RHO,
+            'ScoreProbabilityAlpha': SCORE_PROBABILITY_ALPHA,
+            'DrawOverlayAlpha': DRAW_OVERLAY_ALPHA,
+            'DrawOverlayMinProb': DRAW_OVERLAY_MIN_PROB,
+            'DrawOverlayMaxProb': DRAW_OVERLAY_MAX_PROB,
+            'DrawOverlayGoalDiffScale': DRAW_OVERLAY_GOALDIFF_SCALE,
+            'DrawOverlaySignalScale': DRAW_OVERLAY_SIGNAL_SCALE,
+            'DrawOverlayTotalGoalsCap': DRAW_OVERLAY_TOTAL_GOALS_CAP,
             'H2H_K': run_k,
             'AvgNLL': run_score,
             'Accuracy': run_accuracy,
@@ -2838,6 +3610,19 @@ else:
             current_mode_history = current_mode_history[current_mode_history['MatchStatsMode'] == MATCH_STATS_MODE].copy()
         if 'FeatureSchemaVersion' in current_mode_history.columns:
             current_mode_history = current_mode_history[current_mode_history['FeatureSchemaVersion'] == FEATURE_SCHEMA_VERSION].copy()
+        current_mode_history = filter_outcome_probability_config(
+            current_mode_history,
+            OUTCOME_PROBABILITY_MODE,
+            SCORE_PROBABILITY_TOTAL_SCALE,
+            SCORE_PROBABILITY_RHO,
+            SCORE_PROBABILITY_ALPHA,
+            DRAW_OVERLAY_ALPHA,
+            DRAW_OVERLAY_MIN_PROB,
+            DRAW_OVERLAY_MAX_PROB,
+            DRAW_OVERLAY_GOALDIFF_SCALE,
+            DRAW_OVERLAY_SIGNAL_SCALE,
+            DRAW_OVERLAY_TOTAL_GOALS_CAP
+        )
 
         if PREDICTION_MODE == 'reference':
             decision_df = build_pareto_decision_set(current_mode_history, PARETO_TARGET_SIZE)
@@ -2865,7 +3650,10 @@ else:
 
             final_cols = [
                 'MatchID', 'MatchDate', 'HomeTeam', 'AwayTeam',
-                'PredictionMode', 'MatchStatsMode',
+                'PredictionMode', 'MatchStatsMode', 'OutcomeProbabilityMode',
+                'ScoreProbabilityTotalScale', 'ScoreProbabilityRho', 'ScoreProbabilityAlpha',
+                'DrawOverlayAlpha', 'DrawOverlayMinProb', 'DrawOverlayMaxProb',
+                'DrawOverlayGoalDiffScale', 'DrawOverlaySignalScale', 'DrawOverlayTotalGoalsCap',
                 'RecommendedRunID', 'RecommendationLabel',
                 'WinProb', 'DrawProb', 'LoseProb',
                 'MostLikelyOutcome', 'MostLikelyOutcomeProbability',

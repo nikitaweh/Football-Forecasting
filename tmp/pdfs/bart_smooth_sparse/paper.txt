@@ -1,0 +1,1128 @@
+
+===== PAGE 1 =====
+© 2018 Royal Statistical Society 1369–7412/18/801087
+J. R. Statist. Soc.B (2018)
+80, Part 5, pp. 1087–1110
+Bayesian regression tree ensembles that adapt to
+smoothness and sparsity
+Antonio R. Linero
+Florida State University, Tallahassee, USA
+and Yun Y ang
+University of Illinois at Urbana–Champaign, Champaign, USA
+[Received June 2017. Final revision August 2018]
+Summary. Ensembles of decision trees are a useful tool for obtaining ﬂexible estimates of
+regression functions. Examples of these methods include gradient-boosted decision trees, ran-
+dom forests and Bayesian classiﬁcation and regression trees.Two potential shortcomings of tree
+ensembles are their lack of smoothness and their vulnerability to the curse of dimensionality.We
+show that these issues can be overcome by instead considering sparsity inducing soft decision
+trees in which the decisions are treated as probabilistic. We implement this in the context of the
+Bayesian additive regression trees framework and illustrate its promising performance through
+testing on benchmark data sets. We provide strong theoretical support for our methodology
+by showing that the posterior distribution concentrates at the minimax rate (up to a logarithmic
+factor) for sparse functions and functions with additive structures in the high dimensional regime
+where the dimensionality of the covariate space is allowed to grow nearly exponentially in the
+sample size. Our method also adapts to the unknown smoothness and sparsity levels, and can
+be implemented by making minimal modiﬁcations to existing Bayesian additive regression tree
+algorithms.
+Keywords: Bayesian additive regression trees; Bayesian non-parametrics; High dimensional
+regimes; Model averaging; Posterior consistency
+1. Introduction
+Consider a non-parametric regression model Y = f0.X/ + ϵ with response Y, X ∈ [0, 1]p a
+p-dimensional predictor, f0 an unknown regressionfunction of interest, and Gaussian noise
+ϵ ∼ N.0,σ2/. Suppose that we observe D = ..X1, Y1/, ::: , .Xn, Yn// consisting of independent
+and identically distributed copies of .X, Y/. A popular approach to estimating f0.x/ is to form
+an ensemble of decision trees; common techniques include boosted decision trees (Freund and
+Schapire, 1999) and random forests (Breiman, 2001). Bayesian tree-based models, such as the
+Bayesian additive regression tree (BART) model (Chipmanet al., 2010), have recently attracted
+interest from practitioners due to their excellent empirical performance and natural uncertainty
+quantiﬁcation; the BART model has been applied in a wide variety of contexts such as non-
+parametric function estimation with variable selection (Bleichet al., 2014; Linero, 2018), analysis
+of log-linear models (Murray, 2017) and survival analysis (Sparapani et al., 2016). Addition-
+ally, the BART model is consistently among the best performing methodologies in the Atlantic
+Address for correspondence: Antonio R. Linero, Department of Statistics, Florida State University, 217 Rogers
+Building, 117 North Woodward Avenue, Tallahassee, FL 32306, USA.
+E-mail: arlinero @ stat.fsu.edu
+
+===== PAGE 2 =====
+1088 A. R. Linero and Y .Y ang
+causal inference conference data analysis challenge (Hill, 2011, 2016; Hahn et al., 2017; Dorie
+et al., 2017).
+Despite the recent popularity of Bayesian tree-based models, they suffer from several draw-
+backs. First, in the regression setting, estimators based on decision trees are not capable of
+adapting to higher levels of smoothness exhibited in f
+0 because of their piecewise constant na-
+ture. Second, as illustrated by Linero (2018), they suffer from the curse of dimensionality—their
+prediction performance deteriorates as the dimensionality p increases. Last, but not least, very
+little theoretical work has been done for understanding large sample properties of Bayesian
+tree-based approaches from a frequentist perspective.
+In this paper we propose a new method, called the soft Bayesian additive regression tree
+(SBART) method, which improves both practically and theoretically on existing Bayesian sum-
+of-trees models. To address the ﬁrst aforementioned drawback, we employ an ensemble of
+carefully designed ‘soft’ decision trees as building blocks in the BART model and show in both
+empirical studies and theoretical investigation that the resulting Bayesian approach can adapt
+to the unknown level of smoothness of the true regression function f
+0—the corresponding
+posterior distribution achieves the minimax rate n−α=.2α+p/ of contraction up to logarithmic
+terms (Ghosal et al., 2000) when f0 ∈ Cα,R.[0, 1]d / where Cα,R.[0, 1]d / denotes a H ¨older space
+with smoothness index α and radius R.
+To overcome the curse of dimensionality, we specify sparsity inducing priors (Linero, 2018) for
+the splitting rule probabilities in the soft decision trees. We show that the SBART method takes
+advantage of structural sparsity in the true regression function f
+0—when f0 depends on only
+d ≪ p predictors and isα H¨older smooth, the resulting posterior distribution contracts towards
+the truth at a rate of n−α=.2α+d/ + √ {n−1d log.p/} up to logarithmic terms, which is nearly
+minimax optimal even in the high dimensional setting where p grows nearly exponentially fast
+in n (Yang and Tokdar, 2015). Furthermore, because of the additive nature of sum-of-trees based
+models, we show that the SBART method can also adapt to low order non-linear interactions:
+if f
+0 can be decomposed into many low dimensional pieces f0 = ΣV
+v=1f0v, where each additive
+component f0v is dv sparse and αv smooth, then the SBART method also achieves a nearly
+minimax rate of posterior contraction. Compared with the rate for the general sparse case,
+which allows at most o{log.n/} many active predictors for consistency, the rate for additive
+structures potentially allows o.n
+β/ many predictors for some β∈ .0, 1/; this partly explains the
+empirical success of Bayesian sum-of-tree approaches, as many real world phenomena can be
+explained in terms of a small number of low order interactions.
+Our proofs involve a key lemma that links the sum-of-tree type of estimators with kernel-type
+estimators. Unlike frequentist kernel-type estimators that require prior knowledge on the level
+of smoothness of f
+0 for choosing a smoothness matching kernel, Bayesian sum-of-tree based
+methods are adaptive, requiring no prior knowledge of the smoothness levels {αv}, number
+of additive components V or degree of lower order interactions dv, while still attaining nearly
+minimax rates even under the high dimensional setting. Practically, the SBART method can be
+implemented by making minimal modiﬁcations to existing strategies for ﬁtting Bayesian tree-
+based models: the sparsity inducing prior uses conditionally conjugate Dirichlet priors which
+can be easily accommodated during Gibbs sampling, whereas replacing the usual decision trees
+with soft decision trees requires minor changes to the backﬁtting algorithm that is typically used
+with the BART method.
+1.1. Related work
+There has been a recent surge of interest in the theoretical properties of BART-type models.
+While our work was under review we learned that, in essentially simultaneous work, Rockova
+===== PAGE 3 =====
+Bayesian Regression Tree Ensembles 1089
+and van der Pas (2017) had established similar posterior contraction rates for a particularly
+designed BART prior, using a so-called ‘spike-and-tree’ prior to enable the ensemble to adapt
+to sparsity. In particular, they showed that a single deep decision tree can approximate any
+function with smoothness levelα⩽1, which is then divided among trees with smaller depth. Our
+theory instead relies on linking the sum-of-tree type of estimators with kernel-type estimators,
+which only need shallow trees and motivate the usage of soft decision trees. Practically, the
+most relevant difference is that our SBART prior enables adaptation to the level of smoothness
+even when α > 1, whereas the use of piecewise constant basis functions in traditional BART
+models enables only adaptation to functions which are at most Lipschitz smooth ( α ⩽ 1). An
+additional difference is that we focus on establishing concentration results for the fractional
+posterior, which enables less restrictive assumptions about our choice of prior; in our on-line
+supplementary material, we also provide concentration results for the usual posterior, under
+more stringent conditions. In even more recent work, Alaa and van der Schaar (2018) have
+established consistency results for BART-type priors for estimating individual treatment effects
+in causal inference settings and also noted the limitation of the BART model in adapting to a
+smoothness order that is higher than α= 1.
+The soft decision trees that we use are similar in spirit to those used by Irsoyet al. (2012), who
+considered a soft variant of the classiﬁcation and regression trees algorithm. Our work differs
+in that our trees are not learned in a greedy fashion, but instead by extending the Bayesian
+backﬁtting approach of Chipmanet al. (2010), we consider an ensemble of soft trees rather than
+a single tree, we use a different parameterization of the gating function which does not consider
+oblique decision boundaries and we establish theoretical guarantees for our approach.
+The rest of the paper is organized as follows. In Section 2, we develop our SBART prior. In
+Section 3 we state our theoretical results. In Section 4, we illustrate the methodology on both
+simulated and real data sets. We ﬁnish in Section 5 with a discussion. Proofs are deferred to the
+appendices. In on-line supplementary material, we provide additional computational details,
+timing results and additional theoretical results extending our fractional posterior results to the
+usual posterior.
+2. Soft Bayesian sum-of-trees models
+2.1. Description of the model
+We begin by describing the usual ‘hard’ decision tree prior that is used in the BART model. We
+model f
+0.x/ as the realization of a random function
+f.x/=
+T∑
+t=1
+g.x; Tt, Mt /, x∈ Rp, .1/
+where Tt denotes the topology or splitting rules of the tree, Mt = .μt1, ::: ,μtLt / is a collection
+of parameters for the leaf nodes andLt denotes the number of leaves. The functiong.x; Tt, Mt /
+returns ΣL
+l=1μtlφ.x; Tt, l/ where φ.x; Tt, l/ is the indicator that x is associated with leaf node l in
+Tt.
+Following Chipmanet al. (2010), we endowTt with a branching process prior. The branching
+process begins with a root node of depth k = 0. For k = 0, 1, 2,::: , each node at depth k is
+non-terminal with probability q.k/ = γ.1 + k/−β where γ> 0 and β > 0 are hyperparameters
+controlling the shape of the trees. It is easy to check by using elementary branching process
+theory that this process terminates almost surely provided thatβ> 0 (Athreya and Ney, 2004).
+===== PAGE 4 =====
+1090 A. R. Linero and Y .Y ang
+Given the tree topology, each branch node b is given a decision rule of the form [ xj ⩽ Cb],
+with x going left down the tree if the condition is satisﬁed and right down the tree otherwise.
+The predictor j is selected with probability sj where s= .s1, ::: , sp/ is a probability vector. We
+assume that Cb ∼ uniform.a, b/ where a and b are chosen so that the cell ofRp that is deﬁned by
+the path tob is split along thejth co-ordinate. The leaf parametersμtl are assumed independent
+and identically distributed from an N.0,σ2
+μ=T/ distribution. The scaling factor T ensures the
+stability of the prior on f as the number of trees increases—loosely speaking, the functional
+central limit theorem implies the convergence of the prior onf to a Gaussian process asT →∞ .
+We now describe how to convert the hard decision tree that was described above into a soft
+decision tree. Rather than x following a deterministic path down the tree, x instead follows a
+probabilistic path, with x going left at branch b with probability
+ψ.x; T , b/=ψ
+( xj − Cb
+τb
+)
+,
+where τb > 0 is a bandwidth parameter associated with branch b. Averaging over all possible
+paths, the probability of going to leaf l is
+φ.x; T , l/= ∏
+b∈A.l/
+ψ.x; T , b/1− Rb {1− ψ.x; T , b/}Rb , .2/
+where A.l/ is the set of ancestor nodes of leaf l and Rb = 1 if the path to l goes right at b. The
+parameter τb controls the sharpness of the decision, with the model approaching a hard decision
+tree as τb → 0, and approaching a constant model asτb →∞ . Unlike hard decision trees where
+each leaf is constrained to inﬂuence the regression function f only locally near its centre {Cb},
+each leaf in the soft decision tree imposes a global effect onf , whose inﬂuence asx deviates from
+the centre depends on the local bandwidths{τb}. As we shall illustrate, this global effect of local
+leaves enables the soft tree model to borrow information adaptively across different covariate
+regions, where the degree of smoothing is determined by the local bandwidth parameters that
+are learned from the data. This is illustrated in Fig. 1 for a simple univariate soft decision tree.
+In our illustrations we use the logistic gating functionψ.x/= {1+ exp.− x/}
+−1.
+2.2. Smoothness adaptation
+A well-known feature of decision trees is their lack of smoothness. Single-tree algorithms such
+as the classiﬁcation and regression trees algorithm (Hastie et al. (2009), chapter 9.2) result in
+step function estimates, suggesting that they should not be capable of efﬁciently estimating
+smooth functions (Gy ¨orﬁ et al., 2006). Methods based on ensembles of decision trees average
+over many distinct partitions of the predictor space, resulting in some degree of smoothing.
+Even with this averaging, the estimated regression functions are not smooth. Heuristically,
+we note that under our BART speciﬁcation the function f is not differentiable in quadratic
+mean. Indeed, with trees of depth 1, p = 1, and cut points C
+b ∼ G, simple calculations give
+E[{f.x + δ/ − f.x/}2] ∝ δG′.x/ + o.δ/. Consequently, BART ensembles with a large number
+of trees resemble nowhere-differentiable continuous functions, and in the limit as T →∞ the
+BART prior converges to a nowhere-differentiable Gaussian process. This heuristic argument
+suggests that the BART model can adapt only to functions with H ¨older smoothness level no
+greater than α= 1 (Lipschitz functions).
+Fig. 2 compares the ﬁt of the BART to the SBART model withτ
+b ≡ 0:1. We see that whenT =1
+trees are used we require a large number of leaf nodes to model relatively simple functions. At
+a large scale, we see that the BART ﬁt resembles a nowhere-differentiable continuous function.
+===== PAGE 5 =====
+Bayesian Regression Tree Ensembles 1091
+(a)
+(b)
+Fig. 1. (a) Example tree, with cut points at x D 0.5, 0.25, 0.75, and (b) weights φl .x/ for l D 1,...,4 as
+functions of x for the values τ/NUL1 2 {10, 40, 160, 2560}
+Although it is an improvement, the estimate from the BART model is still not sufﬁciently smooth
+and exhibits large ﬂuctuations.
+The ﬁt of the soft decision tree in Fig. 2 by comparison is inﬁnitely differentiable and requires
+only a small number of parameters. Consequently, we obtain a ﬁt with lower variance and
+negligible bias. An attractive feature of soft decision trees that is exhibited in Fig. 2 is their
+===== PAGE 6 =====
+1092 A. R. Linero and Y .Y ang
+(a)( b)
+(c) (d)
+(e) (f)
+(g) (h)
+Fig. 2. Posterior means ( ) against underlying true regression function ( ) (the error variance
+is σ2 D 22; (a)–(d), f.x/ D 10x1; (e)–(h), f.x/ D 10 sin.2πx1/; BART denotes the BART model with T D 50, DT
+denotes the BART model with T D1, and soft variants are preﬁxed by Soft): (a), (e) BART, (b), (f) DT; (c), (g)
+SoftBART; (d), (h) SoftDT
+ability to approximate linear relationships. In this case, even whenT = 1, we recover the smooth
+functions almost exactly.
+2.3. Prior speciﬁcation and implementation
+Following Chipman et al. (2010), in this section we develop a ‘default’ SBART prior. The goal
+is to develop a prior which can be used routinely, without requiring the user to specify any
+hyperparameters; although the choices below may appearad hoc, they have been found to work
+remarkably well across a wide range of data sets. After adopting the following default prior,
+users may wish to tune the number of treesT and the parameter r in the prior forτ
+b further, or
+===== PAGE 7 =====
+Bayesian Regression Tree Ensembles 1093
+Fig. 3. Draws of the gating function ψ.xI T, b/ when τb /CANExp.0.1/ and Cb D0.5
+to use additional information regarding the targeted level of sparsity. We stress, however, that a
+reasonable baseline level of performance is obtained without the need to do any further tuning.
+Following Chipmanet al. (2010), we recommend scalingY so that most or all of the responses
+fall in the interval [−0:5, 0:5]. We also preprocess Xj so that Xj ∼ uniform.0, 1/ approximately
+by applying a quantile normalization in which eachXij is mapped to its rank, with minXij = 1
+and maxXij = n. We then apply a linear transformation so that the values ofXij are in [0, 1]. The
+goal of this preprocessing of X is to make the prior invariant under monotone transformations
+of X, which is a highly desirable property of the original default BART model.
+We now describe our default prior for the bandwidths τb and the splitting proportions s =
+.s1, ::: , sp/. We use a sparsity inducing Dirichlet prior:
+s∼ D.a=pξ, ::: , a=pξ/, ξ⩾ 1:. 3/
+Our theoretical results require ξ> 1; however, in practice we ﬁnd that setting ξ= 1 works ad-
+equately. This Dirichlet prior for s was introduced by Linero (2018); throughout, we refer to
+the BART model with prior (3) as the Dirichlet additive regression tree (DART) model to con-
+trast it with the BART model when no such sparsity inducing prior is used. The parameter
+a controls the expected amount of sparsity in f . Conditionally on there being B branches in
+the ensemble, the number of predictors has a 1 + Poisson.θ/ distribution (i.e. it is equal in dis-
+tribution to 1 + Z, where Z ∼ Poisson.θ/) with θ= aΣ
+B−1
+i=1 .a+ i/−1 (Linero, 2018) when ξ= 1.
+When prior information is available on the sparsity of f0, we can choose a to match the tar-
+geted amount of sparsity. By default we use a compound gamma prior;a=.a+λa/∼ Be.aa, ba/,
+with aa = 0:5, ba = 1 and λa = p. This prior attempts to strike a balance between the sparse and
+non-sparse settings by having an inﬁnite density at 0, median α= p=4 and an inﬁnite mean.
+There are several possibilities for choosing the bandwidthτb. In preliminary work, using tree-
+speciﬁc τts shared across branches in a ﬁxed tree worked well, withτt ∼ Exp.r/ where E.τt /= r.
+Our illustrations use r = 0:1, which, as shown in Fig. 3, gives a wide range of possible gating
+functions. An interesting feature of the sampled gating functions is that both approximate step
+functions and approximately linear functions are supported.
+===== PAGE 8 =====
+1094 A. R. Linero and Y .Y ang
+We giveσ=var.ϵ/1=2 a half-Cauchy prior,σ∼ Cauchy+.0, ˆσ/. Again following Chipmanet al.
+(2010), ˆσ is an estimate ofσ based on the data. We use an estimate ˆσlasso of σ obtained by ﬁtting
+the lasso using the glmnet package in R.
+The model has hyperparameters.σ2
+μ,γ,β, T/. In preliminary work, we did not have success in
+placing priors on γ and β, and instead we ﬁxed γ= 0:95 and β= 2 (Chipman et al., 2010). We
+give σμ a half-Cauchy prior,σμ ∼ Cauchy+.0, 0:25/,w h e r e0:25 is chosen so thatσμ has median
+equal to the default value that was recommended by Chipman et al. (2010).
+An important remaining speciﬁcation is the number of treesT to include in the ensemble. The
+theoretical results that we establish in Section 3 make use of a prior distribution onT ; however,
+our attempts to incorporate a prior onT by using reversible jump methods (Green, 1995) resulted
+in poor mixing of the associated Markov chain Monte Carlo algorithms. Generally, we have
+found that ﬁxingT at a default value ofT =50 orT =200 is sufﬁcient to attain good performance
+on most data sets. Tuning T further often provides a modest increase in performance but may
+be worth the effort on some data sets (see Section 4.3).
+There are various possible options for tuning T , such as approximate leave-one-out (LOO)
+cross-validation using Pareto-smoothed importance sampling (Vehtariet al., 2017), maximizing
+an approximate marginal likelihood obtained by using (say) the widely applicable Bayesian
+information criterior (WBIC) (Watanabe, 2013), orK-fold cross-validation as recommended by
+Chipman et al. (2010). The advantage of the WBIC and Pareto-smoothed importance sampling
+leave-one-out (PSISLOO) cross-validation is that they require ﬁtting the model only once for
+each value ofT . In practice, we have found that approximations such as the WBIC and PSISLOO
+cross-validation are unreliable, with PSISLOO cross-validation prone to overﬁtting and the
+WBIC requiring potentially very long chains to estimate. Fig. 4 displays the values of PSISLOO
+cross-validation, a WBIC approximation of the negative marginal likelihood of T (Watanabe,
+2013) and ﬁvefold cross-validation, when used to select T for a replicate of the illustration in
+Section 4.1 with p= 100 predictors. Both the WBIC and cross-validation select T = 10, which
+also minimizes the root-mean-squared error
+∫
+{f
+0.x/− ˆf. x /}2dx. Resource permitting, we have
+found that K-fold cross-validation is the most reliable method for selectingT .
+As a default we use the following priors throughout the paper.
+s∼ D.a=p, ::: , a=p/,
+a=.a+ p/∼ Be.0:5, 1/,
+τt
+indep
+∼ Exp.0:1/,
+σμ ∼ Cauchy+.0, 0:25/,
+σ∼ Cauchy+.0, ˆσlasso/,
+γ= 0:95,
+β= 2:
+2.4. Variable grouping prior
+The sparsity inducing prior (3) can be extended to allow penalization of groups of predictors
+simultaneously, in a manner similar to the group lasso (Yuan and Lin, 2006). Suppose that the
+predictors can be divided into M groups of size P
+m.W es e t
+smk = umvmk,
+u∼ D.a=M, ::: , a=M/,
+vm ∼ D.ω=Pm, ::: ,ω=Pm/:
+We primarily use the grouping prior to allow for the inclusion of categorical predictors through
+the inclusion of dummy variables. This is an extension of the approach that is used by the
+===== PAGE 9 =====
+Bayesian Regression Tree Ensembles 1095
+(a)( b)
+(c) (d)
+Fig. 4. Selecting T by using (a) LOO cross-validation, (b) cross-validation and (d) the WBIC, with (c) the population root-mean-squared error for f
+===== PAGE 10 =====
+1096 A. R. Linero and Y .Y ang
+Table 1. Algorithm 1: Bayesian backﬁtting algorithm
+1, for t = 1, ::: , T do
+2, set Y Å
+i ← Yi − Σk̸=tg.X; Tk, Mk / for i= 1, ::: , N
+3, sample Tt ∼ MetropT .Y Å, X,τt, h/
+4, sample τt ∼ Metropτ.Y Å, X, Tt, h/
+5, sample Mt ∼ N. ˆμt, Ωt / with . ˆμt, Ωt / described as in the on-line supplementary material
+6, end for
+7, sample s∼ D.a=pξ+ c1,::: , a=pξ+ cp/ where cj = #{b : branch b splits on predictorj}
+8, sample .σ,σμ, a/ as described in the supplementary materials
+bartMachine package in R. An alternative approach to the inclusion of categorical predictors,
+which is used in the BayesTree package, is to construct decision rules based on a dummy
+variable Zj = I.Xj ∈ Ab/ where Ab is a random subset of the possible values of predictor j.I n
+our illustrations, we let ω→∞ so that vmk = P−1
+m and set a=.a+ M/∼ Be.0:5, 1/.
+2.5. Posterior computation
+We use the Bayesian backﬁtting approach that was described by Chipman et al . (2010) to
+construct a Markov chain Monte Carlo algorithm to sample approximately from the posterior.
+Within algorithm 1 (Table 1), Tt is updated by using a Metropolis–Hastings proposal. Pro-
+posals consist of one of three possible moves: birth, which turns a leaf node into a branch node,
+death, which turns a branch node into a leaf node, and change, which changes the decision rule
+of a branchb. A detailed description of these moves, and their associated transition probabilities,
+is given in the on-line supplementary materials.
+Constructing efﬁcient updates for T
+t and τt requires marginalizing over Mt. Because the
+errors are assumed Gaussian, this marginalization can be carried out in closed form. The main
+computational drawback of the SBART relative to the BART method lies in this marginalization,
+as the SBART method requires computing a likelihood contribution for each leaf–observation
+pair, whereas the BART method requires only a single likelihood contribution for each tree.
+Hence, if the trees are deep, the BART algorithm will be substantially faster. By the construction
+of the prior, trees generally are not sufﬁciently deep for this difference to be prohibitive.
+The Dirichlet prior s∼ D.a=p
+ξ, ::: , a=pξ/ enables a straightforward Gibbs sampling update,
+with the full conditional given by s ∼ D.a=pξ+ c1, ::: , a=pξ+ cp/, where cj = #{b : branch b
+splits on predictor j}. When the grouping prior is used we also obtain simple Gibbs sampling
+updates, with u ∼ D.a=M + z1, ::: , a=M + zM / and vm ∼ D.ω=Pm + cm1, ::: ,ω=Pm + cmPm /,
+where zm = #{b : branch b splits on a predictor in group m} and cmk = #{b : branch b splits
+on predictor mk}.
+3. Theoretical results
+We study the theoretical properties of the SBART procedure from a frequentist perspective
+by assuming that .Y1, Y2, ::: , Yn/ are generated from the model Yi = f0.Xi/+ϵi with some true
+unknown regression functionf0. We assume thatf0 is a function over [0, 1]p. We prove posterior
+consistency results when f0 is a member of certain H ¨older spaces. Let Cα.[0, 1]p/ denote the
+H¨older space with smoothness indexα, i.e. the space of functions on [0, 1]p with bounded partial
+derivatives up to order β, where β is the largest integer strictly less than α and such that the
+partial derivatives of order β are H ¨older continuous of order α− β. Let Cα,R.[0, 1]p/ = {f ∈
+===== PAGE 11 =====
+Bayesian Regression Tree Ensembles 1097
+Cα.[0, 1]p/ :∥f∥α ⩽ R} denote the H¨older ball of radiusR with respect to the H¨older norm∥f∥α
+(see Ghosal and van der Vaart (2017), appendix C).
+We consider the posterior convergence of the Bayesian fractional posterior obtained by raising
+the likelihood function by a factor η∈ .0, 1] in the Bayes formula
+Πn,η.A/=
+∫
+A
+n∏
+i=1
+pf .Yi|Xi/η Π.df/
+∫ n∏
+i=1
+pf .Yi|Xi/η Π.df/
+, .4/
+where Π denotes the prior probability measure overL2.[0, 1]p/: the L2-space over [0, 1]p. Frac-
+tional posteriors have gained renewed attention in Bayesian statistics because of their robustness
+to model misspeciﬁcation (Gr ¨unwald, 2012; Miller and Dunson, 2018). According to Walker
+and Hjort (2001), the fractional posterior can be viewed as combining the original likelihood
+function with a data-dependent prior that is divided by a portion of the likelihood. This data-
+dependent reweighting in the prior helps to prevent possible inconsistencies by reducing the
+weights of those parameter values that ‘track the data too closely’. Additionally, the fractional
+posterior with η< 1 permits much simpler theoretical analyses. Note thatη= 1 corresponds to
+the usual posterior distribution. Abusing the notation slightly, we shall also useΠ to denote the
+prior probability measure over the parameters.T
+t, Mt / and any hyperparameters in the model.
+Our goal is to ﬁnd a sequence {"n : n ⩾ 1} such that, for a sufﬁciently large constant M and
+ﬁxed η,
+Πn,η[∥f − f0∥n ⩾ M"n]→ 0, in probability as n, p→∞ , .5/
+where ∥·∥ n denotes the L2.Pn/ norm on the function space L2.[0, 1]p/ deﬁned by
+∥f − g∥2
+n = n−1 n∑
+i=1
+{f.Xi/− g.Xi/}2:
+The sequence "n is then an upper bound on the posterior contraction rate. The norm ∥·∥ n is a
+commonly adopted discrepancy metric in function estimation problems.
+In this section, we focus on establishing result (5) for η< 1. The beneﬁt of considering η< 1
+is that this allows us to bypass verifying technical conditions regarding the effective support
+of the prior and the existence of a certain sieve (Ghosal et al ., 2000; Ghosal and van der
+Vaart, 2007a), which enables result (5) to be established under very weak conditions. In the on-
+line supplementary material we establish posterior consistency for η= 1 under more stringent
+conditions on the prior.
+The main condition governing the posterior contraction rate is that the priorΠ is sufﬁciently
+‘thick’ at f
+0, in the sense that there is a C> 0 such that
+Π{B"n .f0/} ⩾ exp.− Cn"2
+n/, .6/
+where B".f0/ denotes an "-Kullback–Leibler neighbourhood of the truth
+Bϵ.f0/=
+{
+f : n−1 n∑
+i=1
+∫
+p.i/
+f0 log
+( p.i/
+f0
+p.i/
+f
+)
+dy ⩽ "2
+} ⋂ {
+f : n−1 n∑
+i=1
+∫
+p.i/
+f0 log2
+( p.i/
+f0
+p.i/
+f
+)
+dy ⩽ "2
+}
+,
+where p.i/
+f denotes the ith Gaussian density with mean f.Xi/ and variance σ2. For convenience,
+we adopt the customary practice of assuming thatσis ﬁxed and known when studying the poste-
+rior contraction rate. In the regression setting, it is straightforward to verify that the Kullback–
+===== PAGE 12 =====
+1098 A. R. Linero and Y .Y ang
+Leibler neighbourhood B".f0/ contains the L2.Pn/ neighbourhood {∥f − f0∥n ⩽ 2σ"}. There-
+fore, to establish condition (6), it sufﬁces to ﬁnd "n such that
+Π.∥f − f0∥∞ ⩽ 2σ"n/ ⩾ exp.− Cn"2
+n/
+holds, where∥g∥∞ = supx∈[0,1]p |g.x/| denotes the supremum norm of a functiong in L2.[0, 1]p/.
+We establish condition (6) for a wide class of tree-based models by deriving sharp small
+ball probabilities in the ∥·∥ ∞ norm around the true regression function f0. To be general, we
+consider any gating function ψ : R→ R satisfying the following assumption.
+Assumption 1 (gating function). Let K=ψ.1− ψ/ be an ‘effective’ kernel function associated
+with gating function ψ such that supx∈R |ψ′.x/| <∞ .
+(a)
+∫∞
+−∞ K.x/dx> 0 and, for any positive integer m,
+∫∞
+−∞ |x|m|K.x/|dx< ∞ .
+(b) The function K can be extended to a uniformly bounded analytic function on the strip
+S.ρ/= {z= x+√ .−1/y ∈ C : .x, y/∈ R2,|y| ⩽ρ} in the complex plane for some constant
+ρ> 0.
+Recall thatμtl is the value that is assigned to leafl of tree t,f o rl= 1, 2,::: , Lt and t = 1, ::: , T ,
+and τb is the bandwidth parameter that is associated with branch b. Our ﬁrst result shows that
+any smooth function can be approximated by a sum of soft decision trees taking form (1) in a
+way such that the number of treesT and the approximation error are optimally balanced. This
+lemma is interesting in its own right since it indicates that any d-dimensional smooth function
+can be approximated within error " by using at most poly."
+−1/ many properly rescaled logistic
+activation functions.
+Lemma 1 (approximation by sum of soft decision trees). Suppose that the gating assumption
+1 holds for the gating function ψ. For any function f0 ∈ Cα,R.[0, 1]d /,a n yϵ > 0 and τ> 0,
+there is a sum of soft decision trees with a single bandwidth τb ≡ τ for all branches,
+˜f. x /=
+T∑
+t=1
+g.x; ˜Tt, ˜Mt /, x∈ Rp,
+where each tree ˜Tt has at most 2d branches, T ⩽ C1τ− d logd .1=ϵ/, Σt,l|˜μtl| ⩽ C1τ− d∥f0∥∞ and
+∥ ˜f − f0∥∞ ⩽ D1R.τα + "τ− d /,
+where C1 and D1 are constants independent of .",τ/.
+With the help of lemma 1, we establish result (6) as a direct consequence of the following
+result, where we make the following assumptions on the prior distribution.
+Assumption 2 (prior conditions).
+(a) There are some constants .C1, C2/ such that the prior distribution on the number of trees
+T satisﬁes Π.T = t/ ⩾ C1exp.− C2t/ for t = 0, 1, 2,::: .
+(b) The prior density πτ of tree-speciﬁc bandwidth parameters τt satisﬁes πτ.τ/ ⩾ a1τa2 for
+some constants a1, a2 > 0 for all sufﬁciently small τ.
+(c) The prior on the splitting proportion vector s is D.a=pξ, ::: , a=pξ/ for some ξ> 1 and
+a> 0.
+(d) The leaf coefﬁcients μtl are independent and identically distributed with densityπμ where
+πμ.μ/ ⩾ B1exp.− B2|μ|/ for all μ and some positive constants B1 and B2.
+(e) Π.Dt = k/ >0f o rk = 0, 1,::: ,2 d, where Dt denotes the depth of tree t and d is as in the
+following theorem 1.
+===== PAGE 13 =====
+Bayesian Regression Tree Ensembles 1099
+Remark 1. Condition 2, part (a), is very weak and is satisﬁed, for example, by setting T ∼
+geometric.πT /. Similarly, part (b) is satisﬁed by our choice of τt ∼ Exp.r/. Condition 2, part
+(d), which assumes that the μtls have sufﬁciently heavy tails, is adopted for the simplicity of
+the assumption of independent and identically distributed coefﬁcients but can be weakened to
+allow for the hierarchical model in whichμ
+tl ∼ N.0,σ2
+μ=T/ with σμ ∼ Cauchy+.0,σσ/.
+Remark 2. In the on-line supplementary material we show that, under extra technical con-
+ditions on the prior, the usual posterior (fractional posterior with η= 1) can attain the same
+rate of convergence as in theorem 2 below. These extra conditions are needed to control the size
+of the effective support of the prior and show the existence of a certain sieve (Ghosal et al .,
+2000). In particular, assumption 2 needs only certain lower bounds on the prior density (mass)
+functions, whereas assumption SP in the supplementary material requires some upper bound
+on the tail prior probability of various parameters in the model.
+Theorem 1 (prior concentration for sparse function). Suppose that assumptions 1 and 2 are
+satisﬁed. Let f
+0 ∈ Cα,R.[0, 1]p/ be a bounded regression function that depends on at most d
+covariates. Then there are constantsA and C independent of.n, p/ such that, for all sufﬁciently
+large n, the prior Π over regression function f satisﬁes
+Π.∥f − f0∥∞ ⩽ A"n/ ⩾ exp.− Cn"2
+n/,
+where "n = n−α=.2α+d/ log.n/t +√ {n−1d log.p/} for any t ⩾α.d + 1/=.2α+ d/.
+The following posterior concentration rate for sparse functions follows immediately from
+theorem 1 and theorem 3.2 in Bhattacharya et al. (2016) (see also section 4.1 therein).
+Theorem 2 (posterior convergence rate for sparse truth). Suppose that assumptions 1 and 2
+are satisﬁed. Let f0 ∈Cα,R.[0, 1]p/ be a bounded regression function that depends on at most
+only d covariates. Ifn"2
+n →∞ and "n → 0a s n, p→∞ , then, for all sufﬁciently large constants
+M> 0, we have
+Πn,η.∥f − f0∥n ⩾ M"n/→ 0, in probability as n, p→∞ ,
+where "n = n−α=.2α+d/ logt .n/+√ {n−1d log.p/} for any t ⩾α.d + 1/=.2α+ d/.
+This result shows a salient feature of our sum of soft decision trees model—by introducing the
+soft thresholding, the resulting posterior contraction rate adapts to the unknown smoothness
+level α of the truth f
+0, attaining a nearly minimax rate (Yang and Tokdar, 2015) without the
+need to know α in advance. Our next result shows that, if the truth admits a sparse additive
+structure f0 = ΣV
+v=1f0,v.x/, where each additive component f0,v.x/ is sparse and depends only
+on dv covariates forv=1, ::: , V , then the posterior contraction rate also adaptively (with respect
+to both the additive structure and unknown smoothness of each additive component) attains
+a nearly minimax rate (Yang and Tokdar, 2015) up to log .n/-terms, which leads to a second
+salient feature of the sum of soft decision tree model—it also adaptively learns any unknown
+lower order non-linear interactions between the covariates.
+Theorem 3 (posterior convergence rate for additive sparse truth). Suppose that assumptions
+1 and 2 are satisﬁed. Let f
+0 = ΣV
+v=1f0,v, where the vth additive component f0,v belongs to
+Cαv,R.[0, 1]p/ and is bounded and depends on at most only dv covariates for v= 1, ::: , V .I f
+n"2
+n →∞ and "n → 0a s n, p→∞ , then, for all sufﬁciently large constant M> 0, we have
+Πn,η.∥f − f0∥n ⩾ M"n/→ 0, in probability as n, p→∞ ,
+===== PAGE 14 =====
+1100 A. R. Linero and Y .Y ang
+where
+"n =
+V∑
+v=1
+n−αv=.2αv+dv/ logt .n/+
+V∑
+v=1
+√ {n−1dv log.p/}
+for any t ⩾ maxv αv.dv + 1/=.2αv + dv/.
+4. Illustrations
+4.1. Friedman’s example
+A standard test case, which was initially proposed by Friedman (1991) (see also Chipmanet al.
+(2010)), sets
+f0.x/= 10 sin.πx1x2/+ 20.x3 − 0:5/2 + 10x4 + 5x5:. 7/
+This f0.x/ features two non-linear terms and two linear terms, with a non-linear interaction.
+In this experiment, we consider n = 250 observations, σ2 ∈ {1, 10} and p from 5 to 1000
+along an evenly spaced grid on the scale of log .p/. We compare the SBART method with the
+BART, DART, gradient-boosted decision trees (xgboost), the lasso ( glmnet) and random
+forests (randomForest) methods. A similar experiment was conducted by Linero (2018), who
+showed that the sparsity inducing prior that is used by the DART method resulted in substantial
+gains in performance over the BART method. The purpose of this experiment is to demonstrate
+the further gains which are possible when the smoothness of function (9) is also leveraged.
+Methods are compared by root-mean-squared error, RMSE= {
+∫
+{f.x/− ˆf. x /}
+2 dx}1=2, which
+is approximated by Monte Carlo integration. For the Bayesian procedures, we takeˆf to be the
+pointwise posterior mean of f . The DART and SBART models use their respective default
+priors and were ﬁtted by using 2500 warm-up iterations and 2500 sampling iterations, whereas
+cross-validation was used to tune the hyperparameters for the BART model. The non-Bayesian
+methods were tuned by using cross-validation for each replication of the experiment.
+Results are given in Fig. 5. Among the methods considered, the SBART method performs
+the best, obtaining a sizable improvement over the DART method in both the low noise and
+the high noise settings. Because of the use of a sparsity inducing prior, both the DART and the
+SBART methods are largely invariant to the number of nuisance predictors, whereas random
+forests, the BART–CV method and boosting have errors increasing in log.p/. The lasso also has
+a stable, albeit poor, performance as p increases.
+We now compare the SBART with the DART method for the task of variable selection
+(see Linero (2018) for a detailed comparison of the DART, BART, random forests and lasso
+methods, which found that the DART method performed best among these methods). Our goal
+is to assess whether leveraging smoothness can improve on the good variable selection properties
+of the DART method. We modify Friedman’s function, taking instead
+f.x/= 10 sin.πx
+1x2/+ 20.x3 − 0:5/2 +λ.10x4 + 5x5/,
+where λ is a tuning parameter for the simulation. A variable is included if its posterior inclusion
+probability exceeds 50%. We considerλ∈[0:1, 1]. As measures of accuracy, we consider precision
+TP/(TP + FP), recall TP/(TP + FN) and F1-score (harmonic mean of precision and recall),
+where TP, FP and FN denote the number of true positive, false positive and false negative
+results respectively.
+Results for 20 replications andσ
+2 = 1 are given in Fig. 6, along with the average RMSE. First,
+we see that both the DART and the SBART results have a precision which is roughly constant in
+===== PAGE 15 =====
+Bayesian Regression Tree Ensembles 1101
+Fig. 5. Average root-mean-squared error of various methods, as a function of the dimension P of
+the predictor space (to aid visualization, we also give a LOESS smooth with Monte Carlo standard
+error);
+, BART –CV; , boosting; ,D A R T ; , lasso; , random forests; , SoftBART): (a) σ2 D 1; (b)
+σ2 D10
+λ, with the SBART method performing uniformly better. This makes intuitive sense, as varying
+λshould have little inﬂuence on whether irrelevant predictors are selected. The precision of both
+methods is heavily dependent on λ, and we see that the SBART method is generally capable
+of detecting smaller signal levels; at its largest, the difference in recall is about 10%. Once the
+signal level is sufﬁciently high, both methods detect all relevant predictors consistently. The
+F
+1-score reﬂects a mixture of these two behaviours. Perhaps most interesting is the inﬂuence
+of λ on RMSE. As λ increases, the performance of the DART method degrades whereas the
+SBART performance remains roughly constant. Intuitively this is because, as λ increases, the
+DART algorithm must use an increasing number of branches to capture the additional signal
+in the data, whereas the SBART method is capable of representing the effects corresponding to
+.x
+4, x5/ with fewer parameters.
+4.2. Approximation of non-smooth and locally smooth functions
+A potential concern with the use of soft decision trees is that they may not be able to capture
+ﬁne scale variability in the underlying regression function. An extreme example of this is when
+f is a step function. We consider the regression functionf.x/=2− 4I.x
+1 <0:5/. In this case, one
+===== PAGE 16 =====
+1102 A. R. Linero and Y .Y ang
+Fig. 6. Results for variable selection, with a LOESS smooth to aid visualization: ,D A R T ; , SoftBART
+(a)( b)
+Fig. 7. Estimate of f.x/ D 2 /NUL4I.x1 < 0.5/ by using the posterior mean under (a) the BART and (b) SBART
+priors: , true mean, , ﬁt; , observed data
+===== PAGE 17 =====
+Bayesian Regression Tree Ensembles 1103
+(a)( b)
+(c)
+Fig. 8. (a) Raw data, consisting of observations drawn with the Daubechies wavelet as the mean function
+( ), (b) ﬁt of the SBART model to the raw data, with pointwise 95% posterior credible bands, and (c) ﬁt
+of the BART model to the raw data, with pointwise 95% posterior credible bands
+===== PAGE 18 =====
+1104 A. R. Linero and Y .Y ang
+might expect soft decision trees to perform suboptimally relative to hard decision trees because
+a soft decision tree must model the jump at 0 in a continuous fashion.
+Surprisingly, ensembles of soft decision trees can outperform ensembles of hard decision trees
+even in this case. Fig. 7 shows ﬁts of the BART and SBART models ton= 250 data points and
+a high signal of σ= 0:1. We see that both methods can capture the large jump discontinuity at
+x1 = 0:5. The SBART algorithm performs better away from the discontinuity, however, because
+the level of smoothness is allowed to vary at different points in the covariate space. The trees that
+are responsible for the jump discontinuity have smallτ
+ts to replicate a step function effectively,
+whereas elsewhere the trees have largeτts to allow the function essentially to be constant.
+The ability to select different τts enables the SBART method to obtain locally adaptive be-
+haviour. To illustrate this, Fig. 8 gives the ﬁt of the BART and SBART models when f.x/ is a
+highly localized Daubechies wavelet of smoothness order 10. We see that the SBART method is
+capable of adapting both to the constant regions outside the support of the wavelet and the fast
+oscillatory behaviour within the support of the wavelet. The ﬁt of the BART model, by contrast,
+has many artefacts outside the support of the wavelet and has generally wider credible bands.
+4.3. Benchmark data sets
+We compare the SBART method with various tree-based and non-tree-based methods on sev-
+eral benchmark data sets. We consider the BART, DART, lasso ( glmnet), random forests
+(randomForest) and gradient-boosted decision trees ( xgboost) methods. The parameters
+for the non-Bayesian procedures were chosen, separately for each ﬁt, by using the caret
+package. Default priors (with T = 50) for the SBART and DART models were used; addi-
+tionally, we consider selecting the hyperparameters of the SBART and BART models by cross-
+validation.
+10 data sets are considered. Aside from bbb and wipp, the data sets are a subset of those
+considered by Kim et al . (2007). Although we consider only a subset of these data sets, no
+data sets that were considered for this experiment were omitted. Attributes of these data sets
+are presented in Table 2. The response in each data set was transformed to be approximately
+Gaussian. The bbb, triazines and wipp data sets were also considered by Linero (2018) to
+illustrate features of the sparsity inducing priors for decision tree methods.
+Results of the experiment are given in Table 2. Methods are compared by an estimate of their
+root-mean predictive error obtained by using ﬁvefold cross-validation, with the results averaged
+over 20 replications of the cross-validation. For each experiment, the root-mean predictive error
+for each method is normalized by the root mean predictive error for the SBART–CV method, so
+that scores higher than 1.00 correspond to worse performance than that of the SBART algorithm
+and scores lower than 1.00 correspond to better performance.
+The SBART or SBART–CV method is seen to perform very well in practice, attaining the
+best performance on eight out of the 10 data sets. The results here are consistent with the
+general observation of Chipman et al . (2010) that the BART method outperforms gradient
+boosting and random forests in aggregate over many data sets. Two data sets stand out as
+particularly interesting. First, for the tecator data set, the SBART method outperforms all
+other methods by a very wide margin, indicating that leveraging smoothness for this data set is
+essential for attaining good performance. Second, the only data set for which the SBART–CV
+method substantially outperforms the SBART method is the hatco data set, where tuning the
+number of trees is required to attain optimal performance. This indicates that, for most data
+sets, the default SBART procedure works very well, but that if we want to be absolutely sure of
+optimal performance we should tune T .
+===== PAGE 19 =====
+Bayesian Regression Tree Ensembles 1105
+Table 2. Results of the experiment described in Section 4.3†
+Data Results for the following methods:
+BART–CV DART SBART RF XGB Lasso SBART–CV
+ais 1.00 (1) 1.00 (1) 1.00 (1) 1.01 (5) 1.03 (6) 1.04 (7) 1.00 (1)
+abalone 1.03 (4) 1.03 (4) 1.00 (1) 1.02 (3) 1.03 (4) 1.12 (7) 1.00 (1)
+bbb 1.07 (6) 1.04 (4) 0.99 (1) 1.01 (3) 1.05 (5) 1.10 (7) 1.00 (2)
+cpu 0.98 (2) 1.01 (5) 1.01 (4) 0.97 (1) 1.02 (6) 1.31 (7) 1.00 (3)
+diamonds 1.15 (4) 1.07 (3) 1.01 (2) 2.29 (6) 1.43 (5) 3.53 (7) 1.00 (1)
+hatco 1.14 (3) 1.15 (4) 1.10 (2) 1.39 (6) 1.20 (5) 1.44 (7) 1.00 (1)
+servo 1.02 (3) 1.02 (3) 0.99 (1) 1.17 (6) 1.06 (5) 1.75 (7) 1.00 (2)
+tecator 1.87 (4) 1.63 (4) 0.98 (1) 1.95 (7) 1.56 (3) 1.85 (5) 1.00 (2)
+triazines 0.98 (3) 0.99 (4) 0.99 (4) 0.92 (1) 0.94 (2) 1.13 (7) 1.00 (6)
+wipp 1.19 (4) 1.14 (3) 1.03 (2) 1.43 (7) 1.28 (5) 1.41 (6) 1.00 (1)
+Average RMPE 1.14 (4) 1.11 (3) 1.01 (2) 1.32 (6) 1.16 (5) 1.57 (7) 1.00 (1)
+Average rank 3.4 (3) 3.5 (4) 1.9 (1) 4.5 (5) 4.6 (6) 6.7 (7) 2 (2)
+†The columns associated with the methods give their root mean predictive error RMPE, normalized by the root
+mean predictive error of the SBART–CV method. In parentheses, we give the rank of the method among the ﬁve
+approaches. The best-ranked method for each data set is given in italics.
+5. Discussion
+We have introduced a novel Bayesian sum-of-trees framework and demonstrated that it can
+attain a meaningful improvement over existing methods both in simulated experiments and
+in practice. This was accomplished by incorporating soft decision trees and sparsity inducing
+priors. We also provided theoretical support in the form of nearly optimal results for posterior
+concentration, adaptively over smoothness classes, whenf
+0.x/ is a sparse, or additive, function.
+Although this paper has focused only on the case of non-parametric regression, the method-
+ology proposed extends in a straightforward manner to other settings. For example, the case of
+binary classiﬁcation can be addressed in the usual way via a probit link and data augmentation.
+Our theoretical results concern the rate of convergence of the posterior. Another relevant ques-
+tion is whether the model can consistently estimate the model support, i.e. we can ask under what
+conditions Π.S = S
+0|D/→ 1a sn→∞ , whereS = {p: predictor p appears in the ensemble} and
+S0 = {p : f0 depends on p}. This is an interesting area for future research.
+Software which implements the SBART method is available on line fromhttps://github.
+com/theodds/SoftBART and is undergoing active development. Our code is based on the
+implementation of the BART model in the BayesTree package. Given enough optimization,
+we hope that our implementation could reach speeds within a modest factor of existing highly
+optimized implementations of the BART algorithm (Kapelner and Bleich, 2016).
+Acknowledgements
+This work was partially supported by National Science Foundation grant DMS-1712870 and
+Department of Defense grant SOT-FSU-FATs-16-06.
+Appendix A: Proof of lemma 1
+Let K.d/
+τ .x1, x2, ::: , xd / = τ− d Πd
+j=1K.xj =τ/ denote a d-dimensional tensor product of the rescaled one-
+===== PAGE 20 =====
+1106 A. R. Linero and Y .Y ang
+dimensional kernel K in assumption 1, where recall that τ is the bandwidth parameter in the gating
+function. Let CK :=
+∫
+K.x/dx denote the normalization constant of K, so that we can write K = CK ˜K,
+and the rescaled kernel function ˜K has a unit normalization constant. Also write ˜K
+.d/
+τ = K.d/
+τ =Cd
+K. It is easy
+to verify that ˜K also satisﬁes the two conditions in assumption 1, though it may not be associated with
+any ˜ψ.
+Our proof is composed of three steps. First, we provide error bound estimates of approximating anyα-
+smooth function by a convolutionK.d/
+τ Åg with some carefully constructed functiong for anyτ>0. Second,
+we show that any continuous convolutionK.d/
+τ Åg can be approximated by a discrete sumΣT
+t=1μt K.d/
+τ .·− xt /
+with at most O.τ− d / atoms. Lastly, we provide an error bound estimate on approximating this sum of
+kernels with a sum of soft decision trees by identifying each kernel componentK.d/
+τ .·− xt / as one particular
+leaf in the tth soft decision tree g.x; Tt , Mt / whose depth is at most 2d via splitting at most 2d times, for
+t = 1, ::: , T .
+Step 1: this step follows as a direct result of the following lemma, which is adapted from lemma 3.4 of
+De Jonge et al. (2010).
+Lemma 2. Under assumption 1, for any f0 ∈Cα, R.[0, 1]d /, there are some constants .M1, M2/ indepen-
+dent of τ, and a function Tb,τf0 satisfying ∥Tb,τf0∥∞ ⩽ M1R, such that
+∥ ˜K
+.d/
+τ Å.Tb,τf0/− f0∥∞ ⩽ M2Rτα:
+From lemma 2, we immediately have
+∥K.d/
+τ Åg − f0∥∞ ⩽ M2Rτα,
+where g = C− d
+K Tb,τf0 satisﬁes ∥g∥∞ ⩽ M′
+1R, with M′
+1 = C− d
+K M1 independent of τ.
+Step 2: this step generalizes the theory of approximating a continuous one-dimensional density function
+by a mixture of Gaussian distributions that was developed in Ghosal and van der Vaart (2007b) by a
+location mixture of any kernelK satisfying assumption 1. We also extend their result from density esti-
+mation to general function estimation as demanded in our regression setting, where the target function
+f may not integrate to 1 and can take negative values. First, we state an extension of lemma 3.1 of
+Ghosal and van der Vaart (2001) from dimension 1 to dimension d, and from the Gaussian kernel to
+any kernel K satisfying assumption 1.
+Lemma 3. Under assumption 1, for any probability density functionp
+0 on [0, 1]d ,a n yϵ >0 andτ∈.0, 1/,
+there is a discrete measure Pτ = ΣT
+t=1rtδxt with T ⩽ C1τ− d logd .1=τ/ support points such that ΣT
+t=1rt = 1
+and
+∥K.d/
+τ Åp0 −
+T∑
+t=1
+rt K.d/
+τ .·− xt /∥∞ ⩽ D1ϵ=τd ,
+where .C1, D1/ are independent of τ and K.
+Proof. We sketch only the key difference in the proof from lemma 3.1 of Ghosal and van der Vaart
+(2001) in the one-dimensional case, and a proof for extending the result from the one-dimensional case to
+the multi-dimensional case follows similar lines to those in the proof of theorem 7 in Shenet al. (2013) (by
+replacing the Gaussian kernel with the kernel K).
+The only key property of the Gaussian kernel that was used in the proof of lemma 3.1 of Ghosal and
+van der Vaart (2001) is in bounding the remainder term in the kth-order Taylor series expansion in their
+equation (3.11), where they used the fact that, for any k ⩾ 1, the kth-order derivative of the standard
+Gaussian density function φ.x/= .2π/
+−1=2exp.− x2=2/ at the origin x= 0 satisﬁes the bound
+|φ.k/.0/=k!| ⩽ C1 exp.− C2k/,
+for some sufﬁciently large constant C2 > 0 (since we focus on the approximation error only over the
+unit interval [0, 1], we do not need to include the additional log .1="/ term in equation (3.11) therein).
+Therefore, it sufﬁces to verify a similar exponential decay bound for the kth-order derivative of function
+Kκ :=τ−1K.·=κ/ for some sufﬁciently large number κ> 0 depending on C. In fact, under assumption 1,
+K.·/ can be analytically extended to the strip S.ρ/ in the complex plane (for simplicity, we use the same
+notation K to denote this extension), which implies by applying Cauchy’s integral formula that
+===== PAGE 21 =====
+Bayesian Regression Tree Ensembles 1107
+K.k/
+κ .0/
+k! = 1
+2π√ .−1/
+∮
+Γκ
+Kκ.z/
+zk+1 dz,
+where the closed path Γκ is chosen as a counterclockwise circle centred at the origin with radiusκρ. Since
+K is uniformly bounded on the path Γκ by assumption 1, we can further deduce that
+⏐⏐
+⏐
+⏐
+K
+.k/
+κ .0/
+k!
+⏐⏐
+⏐
+⏐ ⩽ D
+κk+2ρk+1 ⩽ D exp.− C2k/
+holds as long as κ⩾ρ−1 exp.C2/, where D is some constant depending only on K, which completes the
+proof. □
+With lemma 3 on the density function approximation as our preparation, we now return to the problem
+of approximating any general bounded functiong over [0, 1]d . Note that we always have the decomposition
+g =g+ − g− where g+ = max{0, g.x/} and g− .x/= max{0, − g.x/} are the positive parts and negative parts
+of g respectively, and both of them are non-negative and bounded over [0, 1]d . Let A+ =
+∫
+[0,1] d g+.x/dx ⩽
+∥g∥∞ and A− =
+∫
+[0,1] d g− .x/dx ⩽∥g∥∞ . It is obvious that g+=A+ and g− =A− are two legitimate probability
+density functions over [0, 1]d . By applying lemma 3, we can ﬁnd two discrete measuresP+ = ΣT+
+t=1r+
+t δx+
+t and
+P− = ΣT−
+t=1r−
+t δx−
+t such that
+|A−1
++ K.d/
+τ Åg+.x/−
+T+∑
+t=1
+r+
+t K.d/
+τ .x− x+
+t /| ⩽ D"=τd ,
+|A−1
+− K.d/
+τ Åg− .x/−
+T−∑
+t=1
+r−
+t K.d/
+τ .x− x−
+t /| ⩽ D"=τd ,
+for any x∈[0, 1]d and max{T+, T− } ⩽ Cτ− d logd .1="/. Now we combine these two discrete measures into a
+new discrete signed measure
+P0 =
+T+∑
+t=1
+A+r+
+t K.d/
+τ .x− x+
+t /+
+T−∑
+t=1
+.− A− r−
+t /K.d/
+τ .x− x−
+t /,
+which will be denoted as ΣT
+t=1μt K.d/
+τ .·− xt /. Then T ⩽ T− + T+ ⩽ 2Cτ− d logd .1="/ and
+|K.d/
+τ Åg.x/−
+T∑
+t=1
+μt K.d/
+τ .x− xt /| ⩽ .A+ + A− /D"=τd ⩽ 2D∥g∥∞ "=τd ,
+for all x∈[0, 1]d . Moreover, we haveΣT
+t=1|μt| ⩽ A+ΣT+
+t=1r+
+t + A− ΣT−
+t=1r−
+t ⩽ 2∥g∥∞ .
+Step 3: in the last step, for each component μt K.d/
+τ .·− xt / in the sum, we construct a soft decision tree
+˜Tt and its associated leaf values ˜Mt in a way such that
+(a) the tree splits exactly 2 d times and
+(b) the weight function φ.x; Tt , lt / that is speciﬁed in equation (2) associated with one particular leaf lt
+equals τd K.d/
+τ .·− xt /,
+so that the existence of the sum of soft decision trees follows by setting the values˜μtl that are associated
+with other leaves l̸= lt in this trees to be 0, and the value of this leaf as ˜μtlt =τ− dμt . In fact, for any y=
+.y1, ::: , yd /∈[0, 1]d , we have the decompositionK.d/
+τ .y/= Πd
+j=1τ− dψ.yj =τ/{1− ψ.yj =τ/}. Consequently,
+we can construct the treeTt by sequentially splitting twice along each co-ordinatext, j (j = 1, 2,::: , d)o f
+the centre xt = .xt,1 , ::: , xt, d / in μt K.d/
+τ .·− xt /, so that the particular leaf at the end point of the path that
+goes once left and once right at the two branches associated with xt, j,f o rj = 1, ::: , d, receives weight
+φ.·; Tt , lt /=
+d∏
+j=1
+ψ
+(·− xt, j
+τ
+){
+1− ψ
+(·− xt, j
+τ
+)}
+=τd K.d/
+τ .xt /,
+implying that, for any x, g.x; ˜T t , ˜Mt /=˜μtlt φ.x; ˜T t , lt /=μt K.d/
+τ .x− xt /. Since this construction is valid
+for any t = 1, ::: , T ,w eh a v eΣT
+t=1μt K.d/
+τ .x− xt /= ΣT
+t=1g.x; ˜Tt , ˜Mt /.
+Finally, a combination of steps 1–3 together yields a proof of lemma 3.
+===== PAGE 22 =====
+1108 A. R. Linero and Y .Y ang
+Appendix B: Proof of theorem 1
+For convenience, we use the same notationC to denote some constant independent of .n, p/, whose value
+may change from line to line. Without loss of generality, we may assume that f0 depends only on its ﬁrst
+d co-ordinates. Applying lemma 1, we obtain that, for some parameters τ and " to be determined later,
+there exists some ˜f = Σ˜T
+t=1g.x; ˜Tt , ˜Mt / such that ˜T ⩽ Cτ− d logd ."−1/, ∥ ˜f − f0∥∞ ⩽ C.τα + "τ− d / and the
+total number of splits (all are along the ﬁrst d co-ordinates) across all trees are at most 2 d ˜T (2d ˜T many
+leaves in total).
+Recall that our prior over the sum of soft decision tree functionf is speciﬁed in a hierarchical manner:
+ﬁrst, we specify the number T of trees and the tree topology T = {T1, ::: , TT }; second, conditionally on
+these we decide the co-ordinates in all splits across all the decision trees; third, we sample the independent
+splitting locations along all the selected co-ordinates; last, we sample bandwidth parameters τ
+t that are
+associated with each tree and parametersμ associated with all leaves across the trees. We denote by˜T and
+˜T the corresponding number of trees and the tree topology of ˜f .
+We denote all the splitting co-ordinates off given T and the tree topology T by S ∈{1, ::: , p}N , where
+N = ΣT
+t=1.Lt − 1/ ⩽ 2dT and recall that Lt denotes the number of leaves in thetth tree, and denote by ˜S the
+corresponding vector that is associated with ˜f . We also denote the set of all splitting locations (along the
+selected splitting co-ordinates) and bandwidths as x= .x1, x2, ::: , xN /∈ RN and τS = .τ1, τ2, ::: , τT /∈ RT
++
+respectively, and the set of all leaf values as μ= .μ1, ::: , μN+T / ∈ RN+T . We also deﬁne ˜xN and ˜μ in a
+similar way. By construction, it is easy to check that, iff shares the same T , tree topology T and splitting
+co-ordinates S as ˜f , then if {x, τS , μ} are sufﬁciently close to { ˜x, τ, ˜μ} in the sense that, for anyδ> 0,
+max
+u=1,:::, N
+|xu −˜xu| ⩽ Cτ2dδ,
+max
+u=1,:::, T
+|τu − τ| ⩽ Cτd+1δ
+and
+max
+u=1,:::, N+T
+|μu −˜μu| ⩽ CT−1τdδ,
+we have the following perturbation error bound by applying the triangle inequality:
+⏐⏐
+⏐
+⏐
+T∑
+t=1
+g.x; Tt , Mt /−
+˜T∑
+t=1
+g.x; ˜Tt , ˜Mt /
+⏐⏐
+⏐
+⏐ ⩽ Cδ, for all x∈[0, 1]
+p:. 8/
+Now we apply theorem 2.1 in Yang and Dunson (2014) on the prior concentration probability for a
+high dimensional Dirichlet distribution and assumption 2, part (c), to obtain that the splitting proportion
+vector s= .s
+1, ::: , sp/ satisﬁes
+Π
+[
+sj ⩾ .2d/−1 for j = 1, ::: , d, and
+p∑
+j=d+1
+sj ⩽ d−1
+]
+⩾ exp{− Cd log.p/}:. 9/
+This combined with the fact that each tree has depth at most 2 d and assumption 2, part (e), implies that
+the prior probability of T = ˜T given T = ˜T can be lower bounded by
+Π.T = ˜T |T = ˜T/ ⩾ Cd− N ⩾ exp{− Cτ− d logd ."−1/},
+where we have used the fact that N ⩽ Cτ− d logd ."−1/ in the last step. The perturbation error bound (8)
+implies that
+Π.∥f − ˜f∥∞ ⩽ Cδ|T = ˜T , T = ˜T/ ⩾ Π
+(
+max
+u=1,:::, N
+|xu −˜xu| ⩽ Cτ2d , max
+u=1,:::, T
+|τu − τ| ⩽ Cτd+1δ,
+max
+u=1,:::, N+T
+|μu −˜μu| ⩽ CT−1τdδ|T = ˜T , T = ˜T
+)
+⩾ exp[− Cτ− d logd ."−1/ log{.τδ/−1}],
+where in the last step we applied assumptions 2, parts (b) and (d), and used the fact thatΣu|˜μu| ⩽ Cτ− d for
+some constant C only depend onf0 (because of lemma 1). Putting all pieces together and using assumption
+2, part (a), and the properties of ˜f , we obtain
+===== PAGE 23 =====
+Bayesian Regression Tree Ensembles 1109
+Π{∥f − f0∥∞ ⩽ C.δ+τα + "=τd /} ⩾ Π.T = ˜T/ Π.T = ˜T |T = ˜T/ Π.∥f − ˜f∥∞ ⩽ Cδ|T = ˜T , T = ˜T/
+⩾ exp[− Cτ− d logd ."−1/− Cd log.p/− Cτ− d logd ."−1/ log{.τδ/−1}]:
+Therefore, by choosing τ= {logd+1.n/=n}−1=.2α+d/, δ=τα and "=τd+α, we can obtain the claimed prior
+concentration probability lower bound asΠ.∥f − f0∥∞ ⩽ C"n/ ⩾ exp.− Cn"2
+n/.
+Appendix C: Proof of theorem 2
+Using theorem 3.2 in Bhattacharya et al . (2016) (see also section 4.1 therein), it sufﬁces to show that
+Π.∥f − f0∥∞ ⩽ C"n/ ⩾ exp.− Cn"2
+n/. The proof of this is almost the same as that of theorem 1; the only
+difference is that now we apply lemma 1 to ﬁndV functions { ˜f v : v= 1, ::: , V }, where ˜f v contains ˜Tv trees
+and approximates thevth additive componentf0, v in f0 for v=1, ::: , V , and set ˜f = ΣV
+v=1 ˜f v. Because of the
+additive structure in our sum of soft decision tree model, we can always writef = ΣV
+v=1fv where fv collects
+˜Tv trees and has the same sum of soft decision trees prior structure when conditioning on the total number
+of trees T = ΣV
+v=1 ˜Tv, and the conditional priors of.f1, ::: , fv/ given T = ΣV
+v=1 ˜Tv and the splitting proportion
+vector s are independent. Let S = {sj ⩾ .2d/−1 for j = 1, ::: , d, and Σp
+j=d+1sj ⩽ d−1} denote the event in
+inequality (9) with d := ΣV
+v=1dv. Therefore, we obtain, by applying assumption 2, the prior concentration
+bound (9) for s, and theorem 1 for a single fv (choose parameters τv, δv and "v for each fv as in the proof
+of theorem 1) that
+Π
+(
+∥f − f0∥∞ ⩽ C
+V∑
+v=1
+"n, v
+)
+⩾ Π
+(
+T =
+V∑
+v=1
+˜Tv
+)
+Π.s∈ S/ sup
+s∈S
+{ V∏
+v=1
+Π
+(
+∥fv − f0, v∥∞ ⩽ C"n, v|T =
+V∑
+v=1
+˜Tv, s
+)}
+⩾ exp
+{
+− Cn
+V∑
+v=1
+"2
+n, v − C
+V∑
+v=1
+dv log.p/
+}
+⩾ exp
+{
+− C′n
+( V∑
+v=1
+"n, v
+)2}
+where constants C, C′ > 0, "n, v = n−αv=.2αv+dv/ logtv .n/+√ {n−1dv log.p/} and tv ⩾αv.dv + 1/=.2αv + dv/.
+References
+Alaa, A. M. and van der Schaar, M. (2018) Bayesian nonparametric causal inference: information rates and
+learning algorithms. IEEE J. Selectd Top. Signal Process., to be published, doi 10.1109/JSTP .2018.2848230.
+Athreya, K. B. and Ney, P . E. (2004)Branching Processes. New Y ork: Dover Publications.
+Bhattacharya, A., Pati, D. and Yang, Y . (2016) Bayesian fractional posteriors.Ann. Statist., to be published.
+Bleich, J., Kapelner, A., George, E. I. and Jensen, S. T. (2014) Variable selection for BART: an application to gene
+regulation. Ann. Appl. Statist., 8, 1750–1781.
+Breiman, L. (2001) Random forests.Mach. Learn., 45, 5–32.
+Chipman, H. A., George, E. I. and McCulloch, R. E. (2010) Bart: Bayesian additive regression trees. Ann. Appl.
+Statist., 4, 266–298.
+De Jonge, R. and Van Zanten, J. (2010) Adaptive nonparametric Bayesian inference using location-scale mixture
+priors. Ann. Statist., 38, 3300–3320.
+Dorie, V ., Hill, J., Shalit, U., Scott, M. and Cervone, D. (2017) Automated versus do-it-yourself methods for causal
+inference: lessons learned from a data analysis competition. Preprint arXiv:1707.02641. New Y ork University,
+New Y ork.
+Freund, Y . and Schapire, R. (1999) A short introduction to boosting.J. Jpn. Soc. Artif. Intell., 14, 771–780.
+Friedman, J. H. (1991) Multivariate adaptive regression splines.Ann. Statist., 19, 1–67.
+Ghosal, S., Ghosh, J. K. and van der Vaart, A. W . (2000) Convergence rates of posterior distributions.Ann. Statist.,
+28, 500–531.
+Ghosal, S. and van der Vaart, A. W . (2001) Entropies and rates of convergence for maximum likelihood and Bayes
+estimation for mixtures of normal densities. Ann. Statist., 29, 1233–1263.
+Ghosal, S. and van der Vaart, A. (2007a) Convergence rates of posterior distributions for noniid observations.
+Ann. Statist., 35, 192–223.
+Ghosal, S. and van der Vaart, A. (2007b) Posterior convergence rates of Dirichlet mixtures at smooth densities.
+Ann. Statist., 35, 697–723.
+Ghosal, S. and van der Vaart, A. (2017) Fundamentals of Nonparametric Bayesian Inference . Cambridge: Cam-
+bridge University Press.
+Green, P . J. (1995) Reversible jump Markov chain Monte Carlo computation and Bayesian model determination.
+Biometrika, 82, 711–732.

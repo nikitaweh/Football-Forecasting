@@ -224,11 +224,12 @@ flowchart TD
         R3["8.2 · Fill missing values<br/>(median imputation)"]
         R4["8.3 · Collapse features into BART columns<br/>(all framed as home minus away):<br/>• General signal (see 8.3 detail)<br/>• H2H &amp; Player signals = weighted avg × multiplier<br/>• 7 weather variables kept separate<br/>= 10 columns total"]
         BART[["8.4 · BART MODEL<br/>predicts goal difference ONLY<br/>(200 trees)"]]
-        R6["8.5 · Turn goal difference into<br/>Win / Draw / Loss %<br/>via normal approximation<br/>(residual spread, draw zone ±0.5)"]
-        R7["8.6 · Estimate the scoreline<br/>(e.g. 2–1)"]
+        R6["8.5 · Turn goal difference into<br/>Win / Draw / Loss %<br/><b>default mode = normal</b><br/>(residual spread, draw zone ±0.5)"]
+        R7["8.6 · Estimate the scoreline<br/>(e.g. 2–1) → expected home/away goals"]
+        R7B["8.6b · Outcome-probability conversion<br/>(opt-in · OUTCOME_PROBABILITY_MODE)<br/>re-map W/D/L from expected goals,<br/>then refresh the scoreline"]
         R9["8.7 · If results known:<br/>score AvgNLL (log-loss)<br/>&amp; Accuracy"]
         R10["8.8 · Record confidence<br/>of this run"]
-        R2 --> R3 --> R4 --> BART --> R6 --> R7 --> R9 --> R10
+        R2 --> R3 --> R4 --> BART --> R6 --> R7 --> R7B --> R9 --> R10
         R10 -.repeat for next setting.-> R2
     end
 
@@ -260,6 +261,15 @@ flowchart TD
     end
     R4 -.->|how the General signal is made| GEN
 
+    subgraph OPC["8.6b detail — outcome-probability modes (draws are the lever)"]
+        OPC0["normal (default)<br/>keep the Gaussian ±0.5<br/>draw-zone probabilities"]
+        OPC1["score_dixon_coles · score_poisson<br/>expected goals → Poisson scoreline grid<br/>(Dixon-Coles low-score fix) → sum to H/D/A"]
+        OPC2["…_draw_ratio<br/>borrow only the new Draw %,<br/>keep BART's home : away ratio"]
+        OPC3["draw_multilayer_overlay<br/>strength · score · stats · discipline<br/>similarity → lift Draw % (never cut),<br/>keep home : away ratio"]
+        OPC0 --> OPC1 --> OPC2 --> OPC3
+    end
+    R7B -.->|how the probabilities are re-mapped| OPC
+
     classDef model fill:#2b6cb0,stroke:#1a365d,stroke-width:3px,color:#ffffff,font-weight:bold;
     class GBR,SUR,BART model;
 
@@ -269,6 +279,15 @@ flowchart TD
   </div>
 
   <section class="notes">
+    <div class="note-card data">
+      <h3>New: outcome-probability conversion (step 8.6b)</h3>
+      <ul>
+        <li><strong>Why it exists.</strong> BART only outputs a goal difference; how that becomes Win / Draw / Loss is where <em>draw</em> calibration is won or lost — draws are the lever. The default <code>normal</code> mapping is unchanged, so existing runs behave exactly as before.</li>
+        <li><strong>Score-distribution modes.</strong> <code>score_dixon_coles</code> / <code>score_poisson</code> rebuild H/D/A from a Poisson scoreline grid (Dixon-Coles corrects 0–0 / 1–0 / 0–1 / 1–1); the <code>…_draw_ratio</code> variants borrow only the new Draw % and keep BART's home : away ratio. A blend weight <code>α</code> mixes them with the normal probs.</li>
+        <li><strong>Draw overlay.</strong> <code>draw_multilayer_overlay</code> raises the Draw % from four similarity layers (strength · score · stats · discipline), never lowering it, keeping the home : away ratio. Tunable <code>α</code> + min/max draw band.</li>
+        <li><strong>Guardrail.</strong> <code>compare_draw_modes.py</code> and <code>eval_dixon_coles_all.py</code> verify a mode improves the Draw log-loss <em>without</em> degrading Home/Away, measured per-outcome against the BWIN bookie.</li>
+      </ul>
+    </div>
     <div class="note-card data">
       <h3>Raw data inputs</h3>
       <ul>
