@@ -90,3 +90,9 @@ as_logical_str <- function(x) {
   out[x %in% c("false", "f", "0")] <- FALSE
   out
 }
+
+# TRUE/FALSE mask that tolerates logical OR "True"/"False" text and maps NA->FALSE.
+isTRUE_vec <- function(x) {
+  if (is.logical(x)) return(!is.na(x) & x)
+  tolower(trimws(as.character(x))) %in% c("true", "t", "1")
+}

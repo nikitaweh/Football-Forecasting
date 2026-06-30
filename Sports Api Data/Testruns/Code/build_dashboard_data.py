@@ -37,6 +37,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analyze_backtest_results as agg
 import compare_draw_modes as cdm
+import build_dixon_coles_backtest as dcb
 
 # ── Paths ───────────────────────────────────────────────────────────────────
 ROOT = agg.TESTRUNS_PATH.parents[1]                       # C:/AI Projekt/KI-Projekt
@@ -103,22 +104,68 @@ def _safe_summary(folder):
     return df if not df.empty else None
 
 
+def _floor_score(folder, res_map, bookie_baseline):
+    """Deployable-floor metrics for a folder: NLL/accuracy of the per-match mean
+    forecast over all runs (no hindsight best-run selection). Same basis as the
+    Dixon 'Base floor' and compare_draw_modes, so the whole dashboard agrees.
+    """
+    g = cdm.floor_forecast(folder)  # index MatchID, normalised mean WinProb/DrawProb/LoseProb
+    if g is None or g.empty:
+        return None
+    nlls, correct, n = [], 0, 0
+    for mid, r in g.iterrows():
+        actual = res_map.get(int(mid))
+        if actual is None:
+            continue
+        probs = {'H': r['WinProb'], 'D': r['DrawProb'], 'A': r['LoseProb']}
+        nlls.append(-math.log(max(float(probs[actual]), 1e-12)))
+        correct += int(max(probs, key=probs.get) == actual)
+        n += 1
+    if not nlls:
+        return None
+    floor_nll = sum(nlls) / len(nlls)
+    has_bk = bookie_baseline is not None and not (isinstance(bookie_baseline, float) and math.isnan(bookie_baseline))
+    return {
+        'FloorNLL': floor_nll,
+        'FloorAcc': correct / n,
+        'FloorN': n,
+        'FloorGapVsBookie': (floor_nll - bookie_baseline) if has_bk else float('nan'),
+        'FloorBeatsBookie': (bool(floor_nll < bookie_baseline) if has_bk else None),
+    }
+
+
 # ── exporters ───────────────────────────────────────────────────────────────
-def export_matchday_performance():
-    """Normalised copy of season_summary.csv (regenerated upstream by agg.main())."""
+def export_matchday_performance(res_map, bookie_nll_map, matches_df):
+    """season_summary.csv (best-run metrics) enriched with deployable-floor metrics.
+
+    The dashboard uses the Floor* columns as its headline baseline; Best* are kept
+    only as a faint hindsight reference.
+    """
     if not SEASON_SUMMARY.exists():
         print('  ! season_summary.csv missing; matchday_performance will be empty')
         cols = ['Matchday', 'NumFixtures', 'ResultMix', 'BookieNLL', 'BestNLL', 'MeanNLL',
                 'BestAcc', 'MeanAcc', 'GapVsBookie', 'BeatsBookie', 'EnsembleNLL',
-                'EnsembleAcc', 'EnsembleGapVsBookie', 'NumRuns']
+                'EnsembleAcc', 'EnsembleGapVsBookie', 'NumRuns',
+                'FloorNLL', 'FloorAcc', 'FloorGapVsBookie', 'FloorBeatsBookie']
         pd.DataFrame(columns=cols).to_csv(OUT_DIR / 'matchday_performance.csv', index=False)
         return 0
     df = pd.read_csv(SEASON_SUMMARY).sort_values('Matchday')
+
+    floor_rows = []
+    for md in df['Matchday']:
+        md = int(md)
+        folder = BACKTEST_DIR / f'MD{md:02d}'
+        mdm = matches_df[matches_df['MD'] == md]
+        bb, _, _ = agg.matchday_bookie_baseline(
+            mdm['MatchID'].tolist(), mdm['Result'].tolist(), bookie_nll_map)
+        fs = _floor_score(folder, res_map, bb) or {}
+        floor_rows.append({'Matchday': md, **fs})
+    df = df.merge(pd.DataFrame(floor_rows), on='Matchday', how='left')
     df.to_csv(OUT_DIR / 'matchday_performance.csv', index=False)
     return len(df)
 
 
-def export_mode_and_runs(bookie_nll_map, matches_df):
+def export_mode_and_runs(res_map, bookie_nll_map, matches_df):
     """mode_performance.csv (one row per folder) + run_distributions.csv (every run)."""
     mode_rows, run_rows = [], []
     for md, folder in _md_folders():
@@ -146,6 +193,9 @@ def export_mode_and_runs(bookie_nll_map, matches_df):
         best_run_id = summary.loc[best_idx, 'RunID'] if (best_idx is not None and 'RunID' in summary.columns) else None
         gap = (best_nll - bookie_baseline) if pd.notna(best_nll) and pd.notna(bookie_baseline) else float('nan')
 
+        # deployable-floor metrics (the dashboard's headline baseline)
+        fs = _floor_score(folder, res_map, bookie_baseline) or {}
+
         mode_rows.append({
             'Matchday': md,
             'Mode': mode,
@@ -156,6 +206,10 @@ def export_mode_and_runs(bookie_nll_map, matches_df):
             'BestAvgNLL': best_nll,
             'BestAccuracy': best_acc,
             'MeanAvgNLL': avg_nll.mean(skipna=True),
+            'FloorAvgNLL': fs.get('FloorNLL'),
+            'FloorAccuracy': fs.get('FloorAcc'),
+            'FloorGapVsBookie': fs.get('FloorGapVsBookie'),
+            'FloorBeatsBookie': fs.get('FloorBeatsBookie'),
             'NumRuns': int(avg_nll.notna().sum()),
             'BookieNLL': bookie_baseline,
             'GapVsBookie': gap,
@@ -245,6 +299,24 @@ def export_international():
     return len(df)
 
 
+def export_dixon(res_map, bookie_nll_map):
+    """Season-wide post-hoc Dixon-Coles: per-matchday table + pooled per-outcome.
+
+    Reuses build_dixon_coles_backtest.build_frames so the dashboard shows exactly
+    the same numbers as the persisted backtest files. Reads base runs only - it
+    does NOT write into the backtest folders (that is the standalone script's job),
+    so it never disturbs the source fingerprint / triggers a refresh loop.
+    """
+    try:
+        _, season, per_outcome = dcb.build_frames(res_map, bookie_nll_map)
+    except Exception as e:  # noqa: BLE001
+        print(f'  ! dixon export failed ({e}); writing empty tables')
+        season, per_outcome = pd.DataFrame(), pd.DataFrame()
+    season.to_csv(OUT_DIR / 'dixon_performance.csv', index=False)
+    per_outcome.to_csv(OUT_DIR / 'dixon_per_outcome.csv', index=False)
+    return len(season)
+
+
 def source_fingerprint():
     """A cheap (count, max-mtime) signature of every input the dashboard depends on.
 
@@ -283,10 +355,11 @@ def main():
     bookie_nll_map, odds_src = agg.load_bookmaker_match_nll()
     bookie_df = cdm.load_bookie_forecasts()
 
-    n_md = export_matchday_performance()
-    n_mode, n_runs = export_mode_and_runs(bookie_nll_map, matches_df)
+    n_md = export_matchday_performance(res_map, bookie_nll_map, matches_df)
+    n_mode, n_runs = export_mode_and_runs(res_map, bookie_nll_map, matches_df)
     n_outcome = export_per_outcome_nll(res_map, bookie_df)
     n_intl = export_international()
+    n_dixon = export_dixon(res_map, bookie_nll_map)
 
     manifest = {
         'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
@@ -295,12 +368,13 @@ def main():
         'counts': {
             'matchdays': n_md, 'mode_folders': n_mode, 'run_rows': n_runs,
             'per_outcome_rows': n_outcome, 'international_matches': n_intl,
+            'dixon_matchdays': n_dixon,
         },
     }
     (OUT_DIR / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
     print(f'  matchdays={n_md}  mode_folders={n_mode}  runs={n_runs}  '
-          f'per_outcome={n_outcome}  international={n_intl}')
+          f'per_outcome={n_outcome}  international={n_intl}  dixon={n_dixon}')
     print(f'  manifest fingerprint = {manifest["source_fingerprint"]}')
     print('Done.')
 

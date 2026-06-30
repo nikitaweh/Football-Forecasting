@@ -12,86 +12,76 @@ suppressMessages({
   as.numeric(stats::filter(x, rep(1 / n, n), sides = 2))
 }
 
-# ── Season curve: NLL across matchdays, model vs bookie ──────────────────────
+# ── Season curve: NLL across matchdays, deployable floor vs bookie ───────────
+# Headline = Floor (mean forecast over runs, no hindsight). Best run shown only
+# as a faint grey reference so the selection headroom stays visible.
 season_nll_plot <- function(df, rolling = FALSE) {
   if (is.null(df) || !nrow(df)) return(empty_plot("No matchday data"))
   df <- dplyr::arrange(df, Matchday)
-  marker_col <- ifelse(isTRUE_vec(df$BeatsBookie), PAL$good, PAL$bad)
+  marker_col <- ifelse(isTRUE_vec(df$FloorBeatsBookie), PAL$good, PAL$bad)
 
   p <- plot_ly(df, x = ~Matchday)
+  if ("BestNLL" %in% names(df)) {
+    p <- add_trace(p, y = ~BestNLL, type = "scatter", mode = "lines",
+                   name = "best run (hindsight)", line = list(color = "#cdd5e0", width = 1.4, dash = "dash"),
+                   hovertemplate = "MD%{x}: best %{y:.3f}<extra></extra>")
+  }
   p <- add_trace(p, y = ~BookieNLL, type = "scatter", mode = "lines",
                  name = "Bookie (BWIN)", line = list(color = PAL$bookie, dash = "dot", width = 2),
                  hovertemplate = "MD%{x}: bookie %{y:.3f}<extra></extra>")
-  if ("MeanNLL" %in% names(df)) {
-    p <- add_trace(p, y = ~MeanNLL, type = "scatter", mode = "lines",
-                   name = "Mean run", line = list(color = PAL$mean, width = 1.5),
-                   hovertemplate = "MD%{x}: mean %{y:.3f}<extra></extra>")
-  }
-  if ("EnsembleNLL" %in% names(df) && any(is.finite(df$EnsembleNLL))) {
-    p <- add_trace(p, y = ~EnsembleNLL, type = "scatter", mode = "lines",
-                   name = "Ensemble", line = list(color = PAL$ensemble, width = 1.6),
-                   connectgaps = FALSE,
-                   hovertemplate = "MD%{x}: ensemble %{y:.3f}<extra></extra>")
-  }
-  p <- add_trace(p, y = ~BestNLL, type = "scatter", mode = "lines+markers",
-                 name = "Best run", line = list(color = PAL$model, width = 2.4),
-                 marker = list(color = marker_col, size = 8,
-                               line = list(color = "white", width = 1)),
-                 text = ifelse(isTRUE_vec(df$BeatsBookie), "beats bookie", "below bookie"),
-                 hovertemplate = "MD%{x}: best %{y:.3f}<br>%{text}<extra></extra>")
+  p <- add_trace(p, y = ~FloorNLL, type = "scatter", mode = "lines+markers",
+                 name = "Baseline (floor)", line = list(color = PAL$model, width = 2.4),
+                 marker = list(color = marker_col, size = 8, line = list(color = "white", width = 1)),
+                 text = ifelse(isTRUE_vec(df$FloorBeatsBookie), "beats bookie", "below bookie"),
+                 hovertemplate = "MD%{x}: floor %{y:.3f}<br>%{text}<extra></extra>")
   if (rolling) {
-    p <- add_trace(p, y = .roll_mean(df$BestNLL, 3), type = "scatter", mode = "lines",
-                   name = "Best (3-MD avg)", line = list(color = PAL$model, width = 1, dash = "dash"),
+    p <- add_trace(p, y = .roll_mean(df$FloorNLL, 3), type = "scatter", mode = "lines",
+                   name = "Floor (3-MD avg)", line = list(color = PAL$model, width = 1, dash = "dash"),
                    hoverinfo = "skip")
   }
-  plotly_base(p, ylab = "NLL (lower = better)", xlab = "Matchday")
+  plotly_base(p, ylab = "Deployable-floor NLL (lower = better)", xlab = "Matchday")
 }
 
-# ── Season curve: accuracy across matchdays ──────────────────────────────────
+# ── Season curve: accuracy across matchdays (deployable floor) ───────────────
 season_acc_plot <- function(df) {
   if (is.null(df) || !nrow(df)) return(empty_plot("No matchday data"))
   df <- dplyr::arrange(df, Matchday)
   p <- plot_ly(df, x = ~Matchday)
-  if ("MeanAcc" %in% names(df)) {
-    p <- add_trace(p, y = ~MeanAcc, type = "scatter", mode = "lines",
-                   name = "Mean run", line = list(color = PAL$mean, width = 1.5),
-                   hovertemplate = "MD%{x}: mean %{y:.0%}<extra></extra>")
+  if ("BestAcc" %in% names(df)) {
+    p <- add_trace(p, y = ~BestAcc, type = "scatter", mode = "lines",
+                   name = "best run (hindsight)", line = list(color = "#cdd5e0", width = 1.4, dash = "dash"),
+                   hovertemplate = "MD%{x}: best %{y:.0%}<extra></extra>")
   }
-  if ("EnsembleAcc" %in% names(df) && any(is.finite(df$EnsembleAcc))) {
-    p <- add_trace(p, y = ~EnsembleAcc, type = "scatter", mode = "lines",
-                   name = "Ensemble", line = list(color = PAL$ensemble, width = 1.6),
-                   connectgaps = FALSE,
-                   hovertemplate = "MD%{x}: ensemble %{y:.0%}<extra></extra>")
-  }
-  p <- add_trace(p, y = ~BestAcc, type = "scatter", mode = "lines+markers",
-                 name = "Best run", line = list(color = PAL$model, width = 2.4),
+  p <- add_trace(p, y = ~FloorAcc, type = "scatter", mode = "lines+markers",
+                 name = "Baseline (floor)", line = list(color = PAL$model, width = 2.4),
                  marker = list(color = PAL$model, size = 7, line = list(color = "white", width = 1)),
-                 hovertemplate = "MD%{x}: best %{y:.0%}<extra></extra>")
-  plotly_base(p, ylab = "Accuracy", xlab = "Matchday") |>
+                 hovertemplate = "MD%{x}: floor %{y:.0%}<extra></extra>")
+  plotly_base(p, ylab = "Deployable-floor accuracy", xlab = "Matchday") |>
     plotly::layout(yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
 }
 
-# ── Mode comparison: best metric per variant for one matchday ────────────────
-mode_metric_bar <- function(df, metric = c("BestAvgNLL", "BestAccuracy"), bookie = NA_real_) {
+# ── Mode comparison: deployable-floor metric per variant for one matchday ────
+mode_metric_bar <- function(df, metric = c("FloorAvgNLL", "FloorAccuracy"), bookie = NA_real_) {
   metric <- match.arg(metric)
   if (is.null(df) || !nrow(df)) return(empty_plot("No mode data for this matchday"))
   df <- dplyr::arrange(df, .data[[metric]])
   is_base <- df$Mode == "baseline"
   bar_col <- ifelse(is_base, PAL$model, PAL$ensemble)
-  fmt <- if (metric == "BestAccuracy") ".0%" else ".3f"
+  is_acc <- metric == "FloorAccuracy"
+  fmt <- if (is_acc) ".0%" else ".3f"
   p <- plot_ly(df, x = ~Variant, y = df[[metric]], type = "bar",
                marker = list(color = bar_col),
                hovertemplate = paste0("%{x}: %{y:", fmt, "}<extra></extra>"))
-  if (metric == "BestAvgNLL" && is.finite(bookie)) {
+  if (!is_acc && is.finite(bookie)) {
     p <- add_trace(p, x = df$Variant, y = rep(bookie, nrow(df)), type = "scatter",
                    mode = "lines", name = "Bookie", inherit = FALSE,
                    line = list(color = PAL$bookie, dash = "dot", width = 2),
                    hoverinfo = "skip")
   }
-  ylab <- if (metric == "BestAccuracy") "Best-run accuracy" else "Best-run NLL"
+  ylab <- if (is_acc) "Floor accuracy" else "Floor NLL"
   pb <- plotly_base(p, ylab = ylab, xlab = NULL, hovermode = "closest") |>
     plotly::layout(showlegend = FALSE, xaxis = list(tickangle = -20))
-  if (metric == "BestAccuracy") pb <- plotly::layout(pb, yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
+  if (is_acc) pb <- plotly::layout(pb, yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
   pb
 }
 
@@ -135,6 +125,54 @@ run_box_plot <- function(df, metric = c("AvgNLL", "Accuracy")) {
     plotly::layout(boxmode = "group")
   if (metric == "Accuracy") pb <- plotly::layout(pb, yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
   pb
+}
+
+# ── Dixon-Coles: base vs Dixon NLL across matchdays ──────────────────────────
+dixon_nll_plot <- function(df) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No Dixon-Coles data"))
+  df <- dplyr::arrange(df, Matchday)
+  p <- plot_ly(df, x = ~Matchday)
+  p <- add_trace(p, y = ~BookieNLL, type = "scatter", mode = "lines", name = "Bookie (BWIN)",
+                 line = list(color = PAL$bookie, dash = "dot", width = 2),
+                 hovertemplate = "MD%{x}: bookie %{y:.3f}<extra></extra>")
+  p <- add_trace(p, y = ~BaseNLL, type = "scatter", mode = "lines+markers", name = "Baseline (floor)",
+                 line = list(color = PAL$mean, width = 2), marker = list(color = PAL$mean, size = 6),
+                 hovertemplate = "MD%{x}: base %{y:.3f}<extra></extra>")
+  p <- add_trace(p, y = ~DixonNLL, type = "scatter", mode = "lines+markers", name = "Dixon-Coles",
+                 line = list(color = PAL$model, width = 2.4),
+                 marker = list(color = ifelse(isTRUE_vec(df$DixonImproves), PAL$good, PAL$bad),
+                               size = 8, line = list(color = "white", width = 1)),
+                 text = ifelse(isTRUE_vec(df$DixonImproves), "improves vs base", "worse than base"),
+                 hovertemplate = "MD%{x}: dixon %{y:.3f}<br>%{text}<extra></extra>")
+  plotly_base(p, ylab = "Deployable-floor NLL", xlab = "Matchday")
+}
+
+# ── Dixon-Coles: per-matchday delta (Dixon - base) ───────────────────────────
+dixon_delta_plot <- function(df) {
+  if (is.null(df) || !nrow(df)) return(empty_plot("No Dixon-Coles data"))
+  df <- dplyr::arrange(df, Matchday)
+  p <- plot_ly(df, x = ~Matchday, y = ~Delta, type = "bar",
+               marker = list(color = ifelse(df$Delta <= 0, PAL$good, PAL$bad)),
+               hovertemplate = "MD%{x}: %{y:+.4f}<extra></extra>")
+  plotly_base(p, ylab = "Dixon - Base NLL (neg = better)", xlab = "Matchday", hovermode = "closest") |>
+    plotly::layout(showlegend = FALSE)
+}
+
+# ── Dixon-Coles: pooled per-outcome (H/D/A) guardrail ────────────────────────
+dixon_outcome_plot <- function(po) {
+  if (is.null(po) || !nrow(po)) return(empty_plot("No Dixon-Coles data"))
+  po <- po[po$Outcome %in% c("H", "D", "A"), , drop = FALSE]
+  if (!nrow(po)) return(empty_plot("No Dixon-Coles data"))
+  po$Outcome <- factor(po$Outcome, levels = c("H", "D", "A"))
+  p <- plot_ly(po, x = ~Outcome)
+  p <- add_trace(p, y = ~Base, type = "bar", name = "Baseline (floor)", marker = list(color = PAL$mean),
+                 hovertemplate = "base %{x}: %{y:.3f}<extra></extra>")
+  p <- add_trace(p, y = ~Dixon, type = "bar", name = "Dixon-Coles", marker = list(color = PAL$model),
+                 hovertemplate = "dixon %{x}: %{y:.3f}<extra></extra>")
+  p <- add_trace(p, y = ~Bookie, type = "bar", name = "Bookie", marker = list(color = PAL$bookie),
+                 hovertemplate = "bookie %{x}: %{y:.3f}<extra></extra>")
+  plotly_base(p, ylab = "Pooled per-outcome NLL", xlab = "Actual outcome", hovermode = "closest") |>
+    plotly::layout(barmode = "group")
 }
 
 # ── International: mean metric by competition ─────────────────────────────────
