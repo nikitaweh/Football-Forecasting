@@ -98,7 +98,7 @@ def run_playerstats_pipeline():
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Kombinierte International-Pipeline (WM, EM, Nations League, Freundschaftsspiele): "
+            "Kombinierte International-Pipeline (WM/EM inkl. Qualifikation, Nations League, Freundschaftsspiele): "
             "API-Abruf (Unfiltered) + direkte Filterausgabe (Filtered)"
         )
     )

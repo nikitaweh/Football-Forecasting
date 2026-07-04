@@ -34,6 +34,14 @@ LEAGUE_IDS = {
     1: "World Cup",
     4: "Euro Championship",
     5: "UEFA Nations League",
+    29: "World Cup - Qualification Africa",
+    30: "World Cup - Qualification Asia",
+    31: "World Cup - Qualification CONCACAF",
+    32: "World Cup - Qualification Europe",
+    33: "World Cup - Qualification Oceania",
+    34: "World Cup - Qualification South America",
+    37: "World Cup - Qualification Intercontinental Play-offs",
+    960: "Euro Championship - Qualification",
     10: "Friendlies",
 }
 START_SEASON = 2017

@@ -64,12 +64,22 @@ def convert_match_statistics_to_csv():
         fid = fixture.get("id")
         teams = fx.get("teams", {})
         goals = fx.get("goals", {})
+        # 1X2 targets are defined after 90 minutes. For AET/PEN fixtures the
+        # top-level goals include extra time, while score.fulltime contains the
+        # regulation result. Keeping the regulation target prevents knockout
+        # draws from being mislabeled as home/away wins.
+        regulation_goals = fx.get("score", {}).get("fulltime", {}) or {}
+        home_goals = regulation_goals.get("home")
+        away_goals = regulation_goals.get("away")
+        if home_goals is None or away_goals is None:
+            home_goals = goals.get("home")
+            away_goals = goals.get("away")
         if fid is not None:
             fixtures_dict[fid] = {
                 "home_id": teams.get("home", {}).get("id"),
                 "away_id": teams.get("away", {}).get("id"),
-                "home_goals": goals.get("home"),
-                "away_goals": goals.get("away")
+                "home_goals": home_goals,
+                "away_goals": away_goals
             }
 
     # 2) Statistiken einlesen

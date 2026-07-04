@@ -10,12 +10,12 @@ Es erzeugt pro Match Wahrscheinlichkeiten fuer `H`/`D`/`A` und eine plausible Sc
 Wichtig: Das Outcome-Modell sagt nicht direkt Klassen voraus, sondern `GoalDiff = HomeGoals - AwayGoals`.
 Aus dem vorhergesagten `GoalDiff` werden anschliessend Klassenwahrscheinlichkeiten abgeleitet.
 
-Seit `FEATURE_SCHEMA_VERSION = 'bases_v2_hybrid'` ist die Outcome-Feature-Architektur so umgebaut, dass nicht mehr
+Seit `FEATURE_SCHEMA_VERSION = 'bases_v3_player_workload'` ist die Outcome-Feature-Architektur so umgebaut, dass nicht mehr
 ein flacher Feature-Vektor gewichtet wird, sondern 3 Basissignale (General/H2H/Player) plus Wetter als Kontext:
 
 - `General_BaseSignal`: (Home - Away) aus Match-Stats-Subgruppen (inkl. xG), mit festen Subgruppen-Gewichten.
 - `H2H_BaseSignal`: gewichtetes Signal aus H2H-Features (diese sind bereits relativ).
-- `Player_BaseSignal`: gewichtetes Home-minus-Away Signal aus `Player_BaseDiff` und `Player_AbsencePenaltyDiff`.
+- `Player_BaseSignal`: gewichtetes Home-minus-Away Signal aus `Player_BaseDiff`, `Player_AbsencePenaltyDiff` und `Player_WorkloadDiff`.
 - Wetter bleibt als Kontext (`Weather_*`) und wird direkt als gewichtete Input-Spalte in die Design-Matrix genommen.
 
 ## Ziele / Responsibilities
@@ -78,6 +78,8 @@ Referenz-/Historieninputs (aus Output-Ordnern):
 - `MAX_RUNS_OVERRIDE`: ueberschreibt `MAX_RUNS`, damit der Backtest-Treiber die Anzahl getesteter Gewichtsläufe pro Matchday begrenzen kann.
 - `BACKTEST_DATE_CUTOFF`: schneidet das Trainingsset auf Matches mit `MatchDate < cutoff` zurück und verhindert so Future-Leakage in historischen Matchday-Backtests.
 - `MATCH_STATS_MODE_OVERRIDE`: erzwingt z. B. `predicted`, damit Referenz- oder Backtest-Laeufe keine Ist-Statistiken des vorherzusagenden Spiels verwenden.
+- `OUTCOME_PROBABILITY_MODE=draw_multilayer_overlay`: aktiviert einen opt-in Draw-Overlay nach der normalen GoalDiff-Wahrscheinlichkeit.
+- `DRAW_OVERLAY_ALPHA`, `DRAW_OVERLAY_MIN_PROB`, `DRAW_OVERLAY_MAX_PROB`, `DRAW_OVERLAY_GOALDIFF_SCALE`, `DRAW_OVERLAY_SIGNAL_SCALE`, `DRAW_OVERLAY_TOTAL_GOALS_CAP`: steuern Staerke, Grenzen und Skalen dieses Overlays.
 
 Die Env-Overrides greifen frueh beim Modulimport. Falsche Werte fallen daher nicht erst spaet im Trainingsloop auf, sondern koennen bereits beim Start zu inkonsistentem Verhalten fuehren.
 
@@ -141,7 +143,7 @@ Aus dem (imputierten) Input-DataFrame wird eine Design-Matrix gebaut:
 
 - `General_BaseSignal`
 - `H2H_BaseSignal`
-- `Player_BaseSignal` (aus Player-Form und Absenz-Penalty)
+- `Player_BaseSignal` (aus Player-Form, Absenz-Penalty und zeitnaher Spielerbelastung)
 - plus Wetter-Kontextspalten `Weather_*`
 
 Signaldefinition:
@@ -154,6 +156,7 @@ Signaldefinition:
 - Player-Signal: gewichtete Kombination aus:
   - `Player_BaseDiff` (Home-PlayerScore minus Away-PlayerScore)
   - `Player_AbsencePenaltyDiff` (Away-Absenzpenalty minus Home-Absenzpenalty)
+  - `Player_WorkloadDiff` (Away-Belastung minus Home-Belastung; Bundesliga-Minuten plus Pflichtspiel-Minuten der Nationalmannschaft)
 - Wetter: bleibt absolut (keine Home/Away Differenz).
 
 ### 5a) Player-Base im aktuellen Stand
@@ -194,6 +197,9 @@ Pro Kandidatenlauf:
 5. BART-Regression auf `GoalDiff` mit `SklearnModel(n_trees=200, n_jobs=1)`.
 6. Residual-Sigma wird aus Train-Residuals geschaetzt.
 7. Vorhersage `mu` (GoalDiff) -> `WinProb/DrawProb/LoseProb` via Normalapproximation.
+8. Optionaler Probability-Overlay:
+   - Score-Distribution-Modi koennen H/D/A aus Expected Goals ableiten.
+   - `draw_multilayer_overlay` hebt DrawProb nur dann an, wenn GoalDiff/Basissignale, Score-Erwartung, Match-Stats-Gaps und Disziplin-Layer ausreichend aehnlich sind. Die bestehende Home/Away-Ratio wird dabei erhalten.
 
 Warum `n_jobs=1`:
 

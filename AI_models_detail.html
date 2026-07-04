@@ -127,12 +127,13 @@
 
   <div class="wrap">
     <h1>Model Deep-Dive</h1>
-    <p class="subtitle">A closer look at the three machine-learning models inside <code>AI_match_stats_prediction.py</code>, written for someone new to the topic.</p>
+    <p class="subtitle">A closer look at the three machine-learning models inside <code>AI_match_stats_prediction.py</code> — plus the outcome-probability conversion layer that turns BART's goal difference into Win / Draw / Loss. Written for someone new to the topic.</p>
 
     <div class="jumpbar">
       <a href="#gbr">GBR — Match-Stats Predictor</a>
       <a href="#surrogate">Surrogate — Weight Picker</a>
       <a href="#bart">BART — Outcome Model</a>
+      <a href="#outcome">Outcome-Probability Conversion</a>
     </div>
 
     <!-- ================= GBR ================= -->
@@ -460,7 +461,79 @@ flowchart LR
       <div class="card chain">
         signal row → <strong>BART</strong>: sum of 200 trees, each grown by GROW / PRUNE / CHANGE / SWAP inside an MCMC loop → goal difference + σ → bell curve → Win / Draw / Loss %
       </div>
-      <p>One note: BART is re-fitted for <em>every</em> weight setting the search tries — so in a single program run this whole MCMC procedure runs hundreds of times, once per candidate.</p>
+      <p>One note: BART is re-fitted for <em>every</em> weight setting the search tries — so in a single program run this whole MCMC procedure runs hundreds of times, once per candidate. The final "bell curve → Win / Draw / Loss %" step is only the <em>default</em>; it can be swapped for the score-distribution or draw-overlay modes described in the next section.</p>
+    </section>
+
+    <!-- ================= OUTCOME-PROBABILITY CONVERSION ================= -->
+    <section class="model" id="outcome">
+      <div class="model-head">
+        <span class="pill stub">Layer</span>
+        <h2>Outcome-Probability Conversion — goal difference → Win / Draw / Loss</h2>
+      </div>
+      <p class="role">Not a machine-learning model — a small, swappable layer that decides <em>how</em> BART's single number (goal difference) becomes three probabilities. This is the step where <strong>draw</strong> calibration is won or lost.</p>
+
+      <div class="card callout">
+        <strong>What problem is it solving?</strong> BART is good at picking the favourite but, like most goal-difference models, it <em>systematically under-predicts draws</em> — they sit in the messy middle. The probabilities the user actually bets against are produced <em>here</em>, after BART. So this layer is the lever for fixing draws without retraining anything. It is selected with one switch, <code>OUTCOME_PROBABILITY_MODE</code>, and the historical behaviour is the default.
+      </div>
+
+      <h3>Mode 0 · <code>normal</code> — the default (unchanged)</h3>
+      <p>The original behaviour, kept as the default so nothing breaks: take BART's goal difference <code>μ</code> and its residual spread <code>σ</code>, lay a bell curve over them, and read off three slices using a ±0.5-goal <strong>draw zone</strong>.</p>
+      <div class="formula">Draw % = Φ(<span class="dim">(+0.5−μ)/σ</span>) − Φ(<span class="dim">(−0.5−μ)/σ</span>) &nbsp;·&nbsp; Win % = 1−Φ(<span class="dim">(+0.5−μ)/σ</span>) &nbsp;·&nbsp; Lose % = Φ(<span class="dim">(−0.5−μ)/σ</span>)</div>
+      <p>Everything below is <strong>opt-in</strong>: it runs only when a non-<code>normal</code> mode is chosen, re-mapping the probabilities <em>after</em> the scoreline (expected home/away goals) has been estimated.</p>
+
+      <h3>Mode A · Score-distribution (Poisson &amp; Dixon-Coles)</h3>
+      <p>Instead of one bell curve over the goal <em>difference</em>, model each side's goals directly. Turn the expected home and away goals into two <strong>Poisson</strong> distributions, build the full grid of scorelines (0–0, 1–0, 2–1, …), and add the cells up into Home / Draw / Away.</p>
+      <div class="formula">P(home h, away a) = Poisson(h | λ<sub>home</sub>) · Poisson(a | λ<sub>away</sub>) &nbsp;→&nbsp; sum h&gt;a, h=a, h&lt;a</div>
+      <p><strong>Dixon-Coles</strong> adds the well-known fix that plain Poisson gets wrong: it nudges the four lowest scorelines (0–0, 1–0, 0–1, 1–1) by a parameter <code>ρ</code>, which lifts low-scoring draws that Poisson alone undercounts. Two sub-flavours decide how aggressive to be:</p>
+      <table>
+        <tr><th>Mode</th><th>What it changes</th></tr>
+        <tr><td><code>score_poisson</code> / <code>score_dixon_coles</code></td><td>Replace H/D/A entirely with the scoreline-grid probabilities.</td></tr>
+        <tr><td><code>score_poisson_draw_ratio</code> / <code>score_dixon_coles_draw_ratio</code></td><td>Borrow <em>only</em> the new Draw %, then keep BART's original home : away ratio for the rest — a gentler nudge.</td></tr>
+      </table>
+      <p>A blend weight <code>α</code> (0 → keep normal, 1 → full replacement) mixes the new probabilities with the default ones, and the row is renormalised to sum to 1.</p>
+
+      <h3>Mode B · <code>draw_multilayer_overlay</code> — the bespoke draw lever</h3>
+      <p>This mode never touches the favourite's identity — it only asks "<em>how draw-ish is this match?</em>" and raises the Draw % accordingly, taking the lift out of Home and Away in their existing ratio. The "draw-ishness" is a score in [0, 1] built from <strong>four similarity layers</strong>, each one high when the two teams look evenly matched:</p>
+
+      <div class="tree-wrap">
+        <pre class="mermaid">
+flowchart TD
+    S1["STRENGTH layer<br/>closeness of goal-diff +<br/>General / H2H / Player signals"]
+    S2["SCORE layer<br/>small goal gap +<br/>low total goals (cap)"]
+    S3["STATS layer<br/>similar xG, shots, possession,<br/>passing, corners…"]
+    S4["DISCIPLINE layer<br/>similar fouls/cards +<br/>scrappy-game load"]
+    SUP["support = 0.35·score<br/>+ 0.45·stats + 0.20·discipline"]
+    SIG["draw signal =<br/>strength × (0.65 + 0.35·support)"]
+    CAND["candidate Draw %<br/>mapped into [min, max] band"]
+    LIFT["lift Draw % toward candidate<br/>(α, never below base) ·<br/>keep home : away ratio"]
+    S2 --> SUP
+    S3 --> SUP
+    S4 --> SUP
+    S1 --> SIG
+    SUP --> SIG --> CAND --> LIFT
+        </pre>
+        <p class="caption">Strength is the spine; score / stats / discipline only modulate it ±35%. The result is squeezed into a draw band (default 0.14–0.36) and blended in by α (default 0.60).</p>
+      </div>
+
+      <ul>
+        <li><strong>Strength</strong> — how close the teams are on the big signals (predicted goal difference, plus the General / H2H / Player base signals). Each uses an exponential closeness <code>exp(−|home−away| / scale)</code>.</li>
+        <li><strong>Score</strong> — a small expected goal gap <em>and</em> a low expected total (a 0–0-ish game is more drawable than a 3–3-ish one) via a total-goals cap.</li>
+        <li><strong>Stats</strong> — similarity of the predicted match stats (xG, shots on target, shots, possession, pass accuracy, corners, passes), each with its own scale.</li>
+        <li><strong>Discipline</strong> — similar fouls/cards <em>and</em> a "scrappy game" load term (lots of fouls/cards → choppier → more draw-prone).</li>
+      </ul>
+      <p>The lift is one-directional and ratio-preserving:</p>
+      <div class="formula">final Draw = base + α·(max(base, candidate) − base) &nbsp;·&nbsp; Home : Away keep their original split of the remainder</div>
+
+      <h3>Guardrail — how a draw mode earns its place</h3>
+      <div class="card callout">
+        A draw mode is only useful if it fixes draws <strong>without</strong> wrecking the rest. <code>compare_draw_modes.py</code> and <code>eval_dixon_coles_all.py</code> grade each mode <em>per outcome</em> (Home / Draw / Away log-loss) against the BWIN bookmaker across the backtested matchdays. The bar: lower Draw log-loss, no meaningful loss on Home/Away. Dixon-Coles can be re-scored exactly from saved expected goals, so it needs no BART re-run.
+      </div>
+
+      <h3>Where it fits in the bigger picture</h3>
+      <div class="card chain">
+        BART → goal difference + σ → <strong>scoreline (expected home/away goals)</strong> → <strong>Outcome-Probability Conversion</strong> (normal · Dixon-Coles score dist · draw overlay) → Win / Draw / Loss % → scoring
+      </div>
+      <p>Every run records which mode and parameters it used (<code>OutcomeProbabilityMode</code>, the <code>DrawOverlay…</code> / <code>ScoreProbability…</code> settings), and the surrogate history is filtered by them so only like-for-like runs are ever compared.</p>
     </section>
   </div>
 

@@ -112,6 +112,8 @@ def run_one_matchday(matchday, fixtures, cutoff_date, max_runs, match_stats_mode
         env=env,
         capture_output=True,
         text=True,
+        encoding='utf-8',
+        errors='replace',
     )
     if result.returncode != 0:
         print(f'  MD{matchday:02d}: FAILED (rc={result.returncode})')

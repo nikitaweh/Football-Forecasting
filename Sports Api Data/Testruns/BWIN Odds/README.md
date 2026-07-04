@@ -1,51 +1,58 @@
 # BWIN Odds (1X2)
 
-Neuer Ordnerpfad:
+Ordnerpfad:
 
 `C:\AI Projekt\KI-Projekt\Sports Api Data\Testruns\BWIN Odds`
 
 Skript:
 
-`C:\AI Projekt\KI-Projekt\Sports Api Data\Testruns\BWIN Odds\Code\bwin_match_winner_odds_scraper.py`
+`C:\AI Projekt\KI-Projekt\Sports Api Data\Testruns\BWIN Odds\Code\bwin_historical_odds_download.py`
 
 Output-Ordner:
 
 `C:\AI Projekt\KI-Projekt\Sports Api Data\Testruns\BWIN Odds\Datacollection`
 
-## Was wird gescraped?
+## Was wird geladen?
 
-- Nur Match-Siegerquoten (`1`, `X`, `2`)
-- Keine Over/Under-Maerkte wie `2.5`, `3.5` usw.
+Historische 1X2-Quoten (`1`, `X`, `2`) von **football-data.co.uk** (keine
+Over/Under-Maerkte). Das Skript erzeugt zwei Feeds:
+
+### 1. Bundesliga (BWIN)
+
+- Quelle: `mmz4281/<saison>/D1.csv` (Spalten `BWH`/`BWD`/`BWA` = echte BWIN-Quoten).
+- Verknuepft auf die MatchIDs aus `Stammdaten_78.csv`.
+- Output: `bwin_historical_odds_YYYYMMDD_HHMMSS.csv`
+  (Diese Datei wird von den Backtest-Analysen gelesen – Spalten nicht aendern.)
+
+### 2. World Cup 2026 (international)
+
+- Quelle: `WorldCup2026.xlsx`.
+- **Wichtig:** football-data.co.uk veroeffentlicht fuer Nationalmannschafts-
+  spiele **keine BWIN- (und keine Tipico-) Quoten**. Verfuegbar sind nur
+  `bet365`, Betfair Exchange sowie die Markt-Werte `Max`/`Avg`.
+- Pro Buchmacher wird eine eigene CSV geschrieben:
+  - `worldcup_odds_bet365_YYYYMMDD_HHMMSS.csv`
+  - `worldcup_odds_betfair_exchange_YYYYMMDD_HHMMSS.csv`
+  - `worldcup_odds_max_YYYYMMDD_HHMMSS.csv`
+  - `worldcup_odds_avg_YYYYMMDD_HHMMSS.csv`
+- Verknuepft auf die MatchIDs aus `Stammdaten_international.csv`
+  (League ID 1, Season 2026). Nationen-Namen werden ueber
+  `WORLD_CUP_TEAM_ALIASES` im Skript auf die api-football-Namen gemappt.
+- football-data fuellt das XLSX erst **nach** Spielende, d.h. es erscheinen
+  gespielte Partien (laufend ergaenzt), keine reinen Vorab-Fixtures.
 
 ## Start
 
 Im Projektordner ausfuehren:
 
 ```powershell
-.\.venv\Scripts\python.exe "Sports Api Data\Testruns\BWIN Odds\Code\bwin_match_winner_odds_scraper.py"
+.\Supportdateien\.venv\Scripts\python.exe "Sports Api Data\Testruns\BWIN Odds\Code\bwin_historical_odds_download.py"
 ```
 
-Das Skript speichert pro Lauf eine neue CSV mit Zeitstempel im Dateinamen:
+## Abhaengigkeiten
 
-- `bwin_match_winner_odds_YYYYMMDD_HHMMSS.csv`
-
-## Hinweis zu WebDriver
-
-Das Skript versucht automatisch:
-
-- lokalen `msedgedriver` (WinGet-Installation)
-- lokalen `chromedriver` aus Selenium-Cache
-- danach Selenium-Manager
-
-Wenn Selenium den Browser-Driver trotzdem nicht starten kann, setze den Pfad manuell:
+Das Lesen der XLSX-Datei benoetigt `openpyxl`:
 
 ```powershell
-$env:BWIN_WEBDRIVER_PATH="C:\Pfad\zu\chromedriver.exe"
-.\.venv\Scripts\python.exe "Sports Api Data\Testruns\BWIN Odds\Code\bwin_match_winner_odds_scraper.py"
-```
-
-EdgeDriver einmalig per Winget installieren:
-
-```powershell
-winget install --id Microsoft.EdgeDriver --exact --accept-package-agreements --accept-source-agreements
+.\Supportdateien\.venv\Scripts\python.exe -m pip install openpyxl
 ```

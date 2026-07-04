@@ -356,3 +356,13 @@ The team/position/global medians are computed across the **full dataset** of `Pl
 6. **No upper bound on absence penalty magnitude.** Theoretically the penalty could grow large with many high-impact injuries. No safety clamp; in practice the data ranges keep it bounded.
 
 7. **Naming cleanup.** `Player_FormDiff` weight name pointing at `Player_BaseDiff` column is mildly confusing.
+
+---
+
+## 2026-06-20 extension: cross-competition player workload
+
+The Bundesliga player base now also includes `Player_WorkloadDiff`. Actual Bundesliga minutes are combined with competitive international player minutes. When exact international minutes are unavailable, confirmed international starts are used as a 90-minute proxy; bench listings are ignored.
+
+The workload is computed strictly before each target match over 14- and 30-day windows. International friendlies are excluded. The feature schema is now `bases_v3_player_workload`, and older run-history rows are deliberately not migrated into this schema because their NLL targets were generated without the workload signal.
+
+Detailed definitions, limitations and validation requirements are documented in `docs/international_competitive_and_player_workload.md`.
