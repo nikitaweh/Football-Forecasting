@@ -127,6 +127,52 @@ run_box_plot <- function(df, metric = c("AvgNLL", "Accuracy")) {
   pb
 }
 
+# ── Mode explorer: every mode across matchdays, one clickable series each ────
+MODE_COLORS <- c(
+  "baseline (v2)"           = "#2563eb",
+  "normal (v3-workload)"    = "#f97316",
+  "dixon_coles"             = "#7c3aed",
+  "draw_multilayer_overlay" = "#f59e0b",
+  "score_dixon_coles"       = "#ec4899",
+  "bookie"                  = "#9aa3b2"
+)
+MODE_LABELS <- c(
+  "baseline (v2)"           = "Baseline (v2)",
+  "normal (v3-workload)"    = "Player workload (v3)",
+  "dixon_coles"             = "Dixon-Coles",
+  "draw_multilayer_overlay" = "Draw overlay",
+  "score_dixon_coles"       = "Score Dixon (runs)",
+  "bookie"                  = "Bookie (BWIN)"
+)
+
+mode_curve_plot <- function(df, metric = c("NLL", "Acc")) {
+  metric <- match.arg(metric)
+  if (is.null(df) || !nrow(df)) return(empty_plot("No mode data"))
+  ordered <- names(MODE_COLORS)
+  modes <- c(intersect(ordered, unique(df$Mode)), setdiff(unique(df$Mode), ordered))
+  cycle <- c("#0ea5e9", "#10b981", "#a855f7", "#ef4444", "#eab308")
+  p <- plot_ly()
+  for (i in seq_along(modes)) {
+    m <- modes[[i]]
+    sub <- df[df$Mode == m, ]
+    sub <- sub[order(sub$Matchday), ]
+    col <- if (m %in% names(MODE_COLORS)) MODE_COLORS[[m]] else cycle[((i - 1) %% length(cycle)) + 1]
+    lab <- if (m %in% names(MODE_LABELS)) MODE_LABELS[[m]] else m
+    p <- add_trace(p, x = sub$Matchday, y = sub[[metric]], type = "scatter", mode = "lines+markers",
+                   name = lab, legendgroup = m,
+                   line = list(color = col, width = if (m == "bookie") 2 else 2.3,
+                               dash = if (m == "bookie") "dot" else "solid"),
+                   marker = list(color = col, size = 7, line = list(color = "white", width = 1)),
+                   hovertemplate = paste0(lab, " · MD%{x}: %{y:", if (metric == "Acc") ".0%" else ".3f",
+                                          "}<extra></extra>"))
+  }
+  ylab <- if (metric == "Acc") "Deployable-floor accuracy" else "Deployable-floor NLL (lower = better)"
+  pb <- plotly_base(p, ylab = ylab, xlab = "Matchday", hovermode = "closest") |>
+    plotly::layout(legend = list(orientation = "h", x = 0, y = 1.1))
+  if (metric == "Acc") pb <- plotly::layout(pb, yaxis = list(tickformat = ".0%", gridcolor = PAL$grid))
+  pb
+}
+
 # ── Dixon-Coles: base vs Dixon NLL across matchdays ──────────────────────────
 dixon_nll_plot <- function(df) {
   if (is.null(df) || !nrow(df)) return(empty_plot("No Dixon-Coles data"))

@@ -317,6 +317,93 @@ def export_dixon(res_map, bookie_nll_map):
     return len(season)
 
 
+SCHEMA_SHORT = {'bases_v2_hybrid': 'v2', 'bases_v3_player_workload': 'v3-workload'}
+
+
+def _first_val(summary, col):
+    if summary is not None and col in summary.columns:
+        vals = [str(v) for v in summary[col].dropna().unique()]
+        return vals[0] if vals else None
+    return None
+
+
+def _mode_key(folder, md, summary, meta):
+    """Composite mode label = FeatureSchemaVersion x OutcomeProbabilityMode.
+
+    Captures both what feeds the model (v2 hybrid vs v3 player-workload) and how
+    probabilities are derived (normal / draw overlay / dixon). The v2 'normal'
+    runs are one 'baseline (v2)' series whether or not they recorded the outcome
+    -mode column (same config, only pipeline vintage differs). Any new schema or
+    outcome mode automatically becomes its own labelled series.
+    """
+    opm = meta.get('OUTCOME_PROBABILITY_MODE') or _first_val(summary, 'OutcomeProbabilityMode')
+    fs = meta.get('FEATURE_SCHEMA_VERSION') or _first_val(summary, 'FeatureSchemaVersion')
+    schema = SCHEMA_SHORT.get(fs, fs)
+    outcome = opm or 'normal'
+    if outcome == 'normal':
+        return 'baseline (v2)' if schema in (None, 'v2') else f'normal ({schema})'
+    return outcome if schema in (None, 'v2') else f'{outcome} ({schema})'
+
+
+def export_mode_curve(res_map, bookie_nll_map, matches_df, bookie_df):
+    """Long table Matchday x Mode of deployable-floor NLL/accuracy for the Mode
+    explorer page: every outcome mode (grouped by OutcomeProbabilityMode) + the
+    season-wide Dixon-Coles + the BWIN bookie, all on the same floor basis.
+    """
+    rows = []
+    bk_pred = {}
+    for _, r in bookie_df.iterrows():
+        probs = {'H': r['p_H'], 'D': r['p_D'], 'A': r['p_A']}
+        bk_pred[int(r['MatchID'])] = max(probs, key=probs.get)
+
+    for md, folder in _md_folders():
+        summary = _safe_summary(folder)
+        if summary is None or 'AvgNLL' not in summary.columns:
+            continue
+        mdm = matches_df[matches_df['MD'] == md]
+        bb, _, _ = agg.matchday_bookie_baseline(mdm['MatchID'].tolist(), mdm['Result'].tolist(), bookie_nll_map)
+        fs = _floor_score(folder, res_map, bb)
+        if not fs:
+            continue
+        mode = _mode_key(folder, md, summary, _read_meta(folder))
+        rows.append({'Matchday': md, 'Mode': mode, 'NLL': fs['FloorNLL'], 'Acc': fs['FloorAcc'],
+                     'N': fs['FloorN'], 'GapVsBookie': fs['FloorGapVsBookie']})
+
+    # season-wide post-hoc Dixon-Coles
+    try:
+        _, season, _ = dcb.build_frames(res_map, bookie_nll_map)
+        for _, r in season.iterrows():
+            rows.append({'Matchday': int(r['Matchday']), 'Mode': 'dixon_coles',
+                         'NLL': r['DixonNLL'], 'Acc': r['DixonAcc'], 'N': r['N'],
+                         'GapVsBookie': r['DixonGapVsBookie']})
+    except Exception as e:  # noqa: BLE001
+        print(f'  ! mode_curve dixon rows skipped ({e})')
+
+    # BWIN bookie
+    for md in sorted(pd.to_numeric(matches_df['MD'], errors='coerce').dropna().unique()):
+        md = int(md)
+        mdm = matches_df[matches_df['MD'] == md]
+        bb, _, _ = agg.matchday_bookie_baseline(mdm['MatchID'].tolist(), mdm['Result'].tolist(), bookie_nll_map)
+        if bb is None or (isinstance(bb, float) and math.isnan(bb)):
+            continue
+        preds = [(bk_pred.get(int(m)), res_map.get(int(m))) for m in mdm['MatchID'].astype(int)]
+        preds = [(p, a) for p, a in preds if p is not None and a is not None]
+        acc = (sum(p == a for p, a in preds) / len(preds)) if preds else float('nan')
+        rows.append({'Matchday': md, 'Mode': 'bookie', 'NLL': bb, 'Acc': acc,
+                     'N': len(preds), 'GapVsBookie': 0.0})
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        # collapse repeated (matchday, mode) - e.g. MD18's three score_dixon reruns
+        df = (df.groupby(['Matchday', 'Mode'], as_index=False)
+                .agg(NLL=('NLL', 'mean'), Acc=('Acc', 'mean'), N=('N', 'mean'),
+                     GapVsBookie=('GapVsBookie', 'mean')))
+        df['BeatsBookie'] = df['GapVsBookie'] < 0
+        df = df.sort_values(['Mode', 'Matchday'])
+    df.to_csv(OUT_DIR / 'mode_curve.csv', index=False)
+    return df['Mode'].nunique() if not df.empty else 0
+
+
 def source_fingerprint():
     """A cheap (count, max-mtime) signature of every input the dashboard depends on.
 
@@ -342,12 +429,15 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f'Exporting dashboard data -> {OUT_DIR}')
 
-    # 1) regenerate season_summary.csv from current outcome data (quietly)
-    with contextlib.redirect_stdout(io.StringIO()):
-        try:
+    # 1) regenerate season_summary.csv from current outcome data (quietly).
+    #    Suppress agg's verbose stdout, but surface any failure on the REAL stdout
+    #    so a stale season_summary can never pass silently.
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
             agg.main()
-        except Exception as e:  # noqa: BLE001 - never let aggregation crash the export
-            print(f'  ! agg.main() failed ({e}); using existing season_summary.csv if present')
+    except Exception as e:  # noqa: BLE001 - never let aggregation crash the export
+        print(f'  ! agg.main() FAILED ({type(e).__name__}: {e}); '
+              f'season_summary.csv may be STALE. Fix the source, then re-run.')
 
     # shared inputs
     matches_df = agg.load_actual_results_by_matchday()
@@ -360,6 +450,7 @@ def main():
     n_outcome = export_per_outcome_nll(res_map, bookie_df)
     n_intl = export_international()
     n_dixon = export_dixon(res_map, bookie_nll_map)
+    n_modes = export_mode_curve(res_map, bookie_nll_map, matches_df, bookie_df)
 
     manifest = {
         'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
@@ -368,13 +459,13 @@ def main():
         'counts': {
             'matchdays': n_md, 'mode_folders': n_mode, 'run_rows': n_runs,
             'per_outcome_rows': n_outcome, 'international_matches': n_intl,
-            'dixon_matchdays': n_dixon,
+            'dixon_matchdays': n_dixon, 'mode_curve_modes': n_modes,
         },
     }
     (OUT_DIR / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
     print(f'  matchdays={n_md}  mode_folders={n_mode}  runs={n_runs}  '
-          f'per_outcome={n_outcome}  international={n_intl}  dixon={n_dixon}')
+          f'per_outcome={n_outcome}  international={n_intl}  dixon={n_dixon}  modes={n_modes}')
     print(f'  manifest fingerprint = {manifest["source_fingerprint"]}')
     print('Done.')
 

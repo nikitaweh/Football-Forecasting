@@ -193,7 +193,7 @@ def main():
 
         # Per-match comparison: best run's per-match NLL vs bookie per-match NLL
         matches_beat = matches_total = None
-        if runs_path.exists() and avg_nll.notna().any():
+        if runs_path.exists() and avg_nll.notna().any() and 'RunID' in summary.columns:
             best_run_id = summary.loc[avg_nll.idxmin(), 'RunID']
             runs = pd.read_csv(runs_path)
             if 'RunID' in runs.columns and 'MatchID' in runs.columns and 'MatchNLL' in runs.columns:

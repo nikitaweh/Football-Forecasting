@@ -30,6 +30,7 @@ ROOT = os.path.dirname(HERE)
 LOG_DIR = os.path.join(ROOT, "logs")
 STATE_FILE = os.path.join(LOG_DIR, "refresh_state.json")
 LOG_FILE = os.path.join(LOG_DIR, "website_refresh.log")
+SFTP_CONFIG_FILE = os.path.join(HERE, "config", "ionos_sftp.json")
 
 LEAGUE = "bundesliga"
 
@@ -63,6 +64,39 @@ def load_state():
 def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as fh:
         json.dump(state, fh, indent=2)
+
+
+def load_sftp_config():
+    """Optional website/config/ionos_sftp.json (gitignored, see .example.json
+    for the shape). Missing file means remote upload is simply skipped, so
+    local-only setups keep working unchanged."""
+    if not os.path.exists(SFTP_CONFIG_FILE):
+        return None
+    try:
+        with open(SFTP_CONFIG_FILE, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (ValueError, OSError):
+        log.exception("ionos_sftp.json unreadable -- skipping remote upload")
+        return None
+
+
+def upload_to_ionos(local_path, cfg):
+    """Push a single file to the configured IONOS webspace over SFTP,
+    landing it at remote_dir/<basename>. Raises on failure; caller decides
+    how loud to be."""
+    import paramiko  # local import: only needed when a config is present
+
+    transport = paramiko.Transport((cfg["host"], cfg.get("port", 22)))
+    try:
+        transport.connect(username=cfg["username"], password=cfg["password"])
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        try:
+            remote_path = cfg["remote_dir"].rstrip("/") + "/" + os.path.basename(local_path)
+            sftp.put(local_path, remote_path)
+        finally:
+            sftp.close()
+    finally:
+        transport.close()
 
 
 def heartbeat(state):
@@ -111,6 +145,20 @@ def main():
         log.info("sources changed -> rebuilt %s (%s, %d matches, %d results, %d upcoming)",
                  os.path.basename(summary["output"]), summary["matchday"],
                  summary["matches"], summary["played"], summary["upcoming"])
+
+        sftp_cfg = load_sftp_config()
+        if sftp_cfg is None:
+            log.info("no website/config/ionos_sftp.json -- live site not updated remotely")
+        else:
+            try:
+                upload_to_ionos(summary["output"], sftp_cfg)
+                log.info("uploaded %s to %s:%s", os.path.basename(summary["output"]),
+                          sftp_cfg["host"], sftp_cfg["remote_dir"])
+            except Exception:
+                # data.js is correct locally either way; a failed upload just
+                # means the live site is stale until the next successful run.
+                log.exception("IONOS upload failed -- live site still shows the previous data.js")
+
         return 0
     except Exception:
         log.exception("refresh failed")

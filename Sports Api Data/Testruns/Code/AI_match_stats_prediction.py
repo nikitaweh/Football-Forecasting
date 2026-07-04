@@ -132,7 +132,11 @@ if _ensemble_k_override:
 # === H2H K SEARCH RANGE ===
 H2H_K_RANGE = (1, 10)
 H2H_K_DEFAULT = 2
-FEATURE_SCHEMA_VERSION = 'bases_v3_player_workload'
+# Env toggle to reproduce the pre-workload v2 model (bases_v2_hybrid): set
+# DISABLE_PLAYER_WORKLOAD=1 to drop Player_WorkloadDiff from the outcome model.
+# Used to run uniform-schema backtests / v2-vs-v3 A/B. Default off = v3 unchanged.
+DISABLE_PLAYER_WORKLOAD = os.environ.get('DISABLE_PLAYER_WORKLOAD', '').strip() in ('1', 'true', 'True')
+FEATURE_SCHEMA_VERSION = 'bases_v2_hybrid' if DISABLE_PLAYER_WORKLOAD else 'bases_v3_player_workload'
 
 # === OUTCOME PROBABILITY CONVERSION ===
 # Default "normal" preserves the historical GoalDiff -> Gaussian-band mapping.
@@ -1086,7 +1090,9 @@ team_form_features = [
 
 h2h_base_features = H2H_COMBINED_FEATURES + H2H_VENUE_FEATURES
 h2h_count_features = ['H2H_Combined_MatchCount', 'H2H_Venue_MatchCount']
-player_base_input_features = ['Player_BaseDiff', 'Player_AbsencePenaltyDiff', 'Player_WorkloadDiff']
+player_base_input_features = ['Player_BaseDiff', 'Player_AbsencePenaltyDiff']
+if not DISABLE_PLAYER_WORKLOAD:
+    player_base_input_features = player_base_input_features + ['Player_WorkloadDiff']
 outcome_prematch_features = team_form_features + h2h_base_features + h2h_count_features + player_base_input_features
 
 match_stats_features = [
@@ -1164,8 +1170,9 @@ WEATHER_CONTEXT_SPECS = [
 PLAYER_BASE_SIGNAL_SPECS = [
     {'weight_name': 'Player_FormDiff', 'column': 'Player_BaseDiff'},
     {'weight_name': 'Player_AbsencePenaltyDiff', 'column': 'Player_AbsencePenaltyDiff'},
-    {'weight_name': 'Player_WorkloadDiff', 'column': 'Player_WorkloadDiff'}
 ]
+if not DISABLE_PLAYER_WORKLOAD:
+    PLAYER_BASE_SIGNAL_SPECS.append({'weight_name': 'Player_WorkloadDiff', 'column': 'Player_WorkloadDiff'})
 BASE_MULTIPLIER_PARAMETER_NAMES = [
     'BaseMultiplier_General',
     'BaseMultiplier_H2H',

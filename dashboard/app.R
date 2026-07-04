@@ -102,6 +102,25 @@ ui <- page_navbar(
     )
   ),
 
+  # ── Bundesliga: Mode explorer (compare every mode + bookie) ──
+  nav_panel(
+    "Mode explorer",
+    layout_columns(
+      fill = FALSE, col_widths = c(4, 8),
+      radioButtons("mc_metric", "Metric", inline = TRUE,
+                   choices = c("Floor NLL" = "NLL", "Accuracy" = "Acc")),
+      div(class = "small text-muted mt-2",
+          "Click a series in the legend to hide/show it; double-click to isolate one mode. Scroll down for the data.")
+    ),
+    card(
+      card_header("All modes across matchdays (deployable floor)"),
+      plotlyOutput("mc_plot", height = "82vh"),
+      full_screen = TRUE
+    ),
+    card(card_header("Per-mode summary"), DTOutput("mc_summary")),
+    card(card_header("All data by mode & matchday"), DTOutput("mc_detail"))
+  ),
+
   # ── Bundesliga: Dixon-Coles (season-wide) ──
   nav_panel(
     "Dixon-Coles",
@@ -171,6 +190,7 @@ server <- function(input, output, session) {
   intl_r      <- make_reader(session, "international_performance.csv")
   dixon_r     <- make_reader(session, "dixon_performance.csv")
   dixon_po_r  <- make_reader(session, "dixon_per_outcome.csv")
+  mode_curve_r <- make_reader(session, "mode_curve.csv")
   manifest_r  <- reactiveFileReader(2000, session, file.path(DATA_DIR, "manifest.json"),
                                     function(p) if (file.exists(p)) jsonlite::read_json(p, simplifyVector = TRUE) else NULL)
 
@@ -276,6 +296,40 @@ server <- function(input, output, session) {
     d <- runs_r(); if (is.null(d) || !nrow(d)) return(empty_plot("No run data"))
     d <- dplyr::filter(d, Matchday >= input$md_range[1], Matchday <= input$md_range[2])
     run_box_plot(d, metric = input$run_metric)
+  })
+
+  # ── Mode explorer ──
+  mode_curve <- reactive({
+    d <- mode_curve_r(); if (is.null(d) || !nrow(d)) return(NULL)
+    d$BeatsBookie <- as_logical_str(d$BeatsBookie)
+    dplyr::filter(d, Matchday >= input$md_range[1], Matchday <= input$md_range[2])
+  })
+  output$mc_plot <- renderPlotly(mode_curve_plot(mode_curve(), input$mc_metric))
+  output$mc_summary <- renderDT({
+    d <- mode_curve(); req(d)
+    s <- d |>
+      dplyr::group_by(Mode) |>
+      dplyr::summarise(Matchdays = dplyr::n(),
+                       MeanNLL = round(mean(NLL, na.rm = TRUE), 3),
+                       MeanAcc = round(mean(Acc, na.rm = TRUE), 3),
+                       MeanGapVsBookie = round(mean(GapVsBookie, na.rm = TRUE), 3),
+                       BeatsBookie = sum(BeatsBookie, na.rm = TRUE),
+                       .groups = "drop") |>
+      dplyr::arrange(MeanNLL)
+    datatable(s, rownames = FALSE, options = list(dom = "t", paging = FALSE, ordering = TRUE),
+              selection = "none") |>
+      formatStyle("MeanGapVsBookie", color = styleInterval(0, c(PAL$good, PAL$bad)))
+  })
+  output$mc_detail <- renderDT({
+    d <- mode_curve(); req(d)
+    det <- d |>
+      dplyr::transmute(Matchday, Mode, NLL = round(NLL, 3), Acc = round(Acc, 3),
+                       N = round(N), GapVsBookie = round(GapVsBookie, 3), BeatsBookie) |>
+      dplyr::arrange(Mode, Matchday)
+    datatable(det, rownames = FALSE, filter = "top",
+              options = list(pageLength = 15, order = list(list(1, "asc"), list(0, "asc"))),
+              selection = "none") |>
+      formatStyle("GapVsBookie", color = styleInterval(0, c(PAL$good, PAL$bad)))
   })
 
   # ── Dixon-Coles ──

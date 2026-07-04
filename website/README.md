@@ -43,6 +43,30 @@ a results update) it rebuilds `data.js`, snapshots the inputs to
 `matchdays/md<N>_*.csv`, and logs to `logs/website_refresh.log` at the repo
 root. Unchanged sources are a quiet no-op (one heartbeat log line per day).
 
+### Pushing to the live site (IONOS)
+
+`refresh_data.py` can also upload the freshly rebuilt `data.js` straight to
+the IONOS webspace over SFTP, so the automatic 10-minute refresh keeps the
+live site in sync too -- not just the local checkout.
+
+Setup (one-time):
+
+1. Install the SFTP dependency into the same Python environment the
+   scheduled task uses: `pip install paramiko`
+2. Copy `website/config/ionos_sftp.example.json` to
+   `website/config/ionos_sftp.json` and fill in the real host/user/password
+   (from IONOS: Hosting → SFTP → "Sichere FTP-Zugänge verwalten") and
+   `remote_dir` (the connected document root, e.g. `/public`).
+3. That's it -- `ionos_sftp.json` is gitignored and never gets committed.
+   If it's missing, `refresh_data.py` just skips the upload (local-only mode).
+
+Every run that rebuilds `data.js` (i.e. sources changed) now also pushes
+that one file to the server. Everything else (`index.html`, `logos/`,
+`mobile/`, ...) still needs a manual upload via the IONOS Webspace Explorer
+whenever it changes -- which is rare (new season, new team, layout tweaks).
+A failed upload is logged but never fails the run: the local `data.js` is
+always correct, only the live copy might lag until the next successful push.
+
 Register the task **once, on the main checkout** (PowerShell):
 
 ```powershell

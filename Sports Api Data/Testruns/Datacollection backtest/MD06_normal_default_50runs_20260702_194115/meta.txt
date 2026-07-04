@@ -1,0 +1,9 @@
+Matchday: 6
+Cutoff: 2025-10-03
+Fixtures: 9
+MAX_RUNS: 50
+MATCH_STATS_MODE: predicted
+OUTCOME_PROBABILITY_MODE: normal
+Pipeline return code: 0
+Outputs copied: 4
+Best summary row: RunID=43, AvgNLL=0.933855, Accuracy=0.6666666666666666

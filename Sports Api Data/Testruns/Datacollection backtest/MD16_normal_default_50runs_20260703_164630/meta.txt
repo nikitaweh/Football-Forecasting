@@ -1,0 +1,9 @@
+Matchday: 16
+Cutoff: 2026-01-09
+Fixtures: 9
+MAX_RUNS: 50
+MATCH_STATS_MODE: predicted
+OUTCOME_PROBABILITY_MODE: normal
+Pipeline return code: 0
+Outputs copied: 4
+Best summary row: RunID=48, AvgNLL=1.112836, Accuracy=0.3333333333333333

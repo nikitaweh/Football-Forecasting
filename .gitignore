@@ -18,3 +18,4 @@ __pycache__/
 Supportdateien/
 .codex/
 logs/
+website/config/ionos_sftp.json
