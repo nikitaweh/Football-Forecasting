@@ -52,6 +52,7 @@ FD_TO_API_TEAM_ID = {
     "Bayern Munich": 157,
     "Bochum": 176,
     "Dortmund": 165,
+    "Elversberg": 1660,
     "Ein Frankfurt": 169,
     "FC Koln": 192,
     "Freiburg": 160,
@@ -62,7 +63,9 @@ FD_TO_API_TEAM_ID = {
     "Leverkusen": 168,
     "M'gladbach": 163,
     "Mainz": 164,
+    "Paderborn": 185,
     "RB Leipzig": 173,
+    "Schalke 04": 174,
     "St Pauli": 186,
     "Stuttgart": 172,
     "Union Berlin": 182,
@@ -73,8 +76,9 @@ FD_TO_API_TEAM_ID = {
 # ---------------------------------------------------------------------------
 # World Cup 2026 (international) configuration
 # ---------------------------------------------------------------------------
+# World Cup fixtures live in the FIFA confederation branch after the FIFA/UEFA split.
 INTL_STAMMDATEN_PATH = (
-    r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/"
+    r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/"
     r"Filtered/Datacollection/Stammdaten_international.csv"
 )
 

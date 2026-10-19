@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ORAKEL — choose a competition</title>
+  <meta name="description" content="Pick a competition to see ORAKEL's latest results and predictions." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230B0B0C'/%3E%3Cpath d='M5 16c3-6 18-6 22 0-4 6-19 6-22 0Z' fill='none' stroke='%232BE08B' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3.4' fill='%232BE08B'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* ── Competition picker (scoped to this page) ─────────────── */
+    .picker-hero { padding: clamp(88px, 15vw, 160px) 0 clamp(48px, 8vw, 88px); text-align: center; }
+    .picker-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      max-width: 860px;
+      margin: 0 auto;
+      padding-bottom: clamp(72px, 12vw, 140px);
+    }
+    .picker-card {
+      display: block;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 32px 28px;
+      text-align: left;
+      transition: border-color .25s var(--ease), background .25s var(--ease), transform .25s var(--ease);
+    }
+    .picker-card:hover {
+      border-color: #34343c;
+      background: var(--card-hover);
+      transform: translateY(-4px);
+    }
+    .picker-card__tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .picker-card__tag::before {
+      content: "";
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+    }
+    .picker-card--intl .picker-card__tag { color: var(--away); }
+    .picker-card--intl .picker-card__tag::before { background: var(--away); box-shadow: 0 0 12px var(--away); }
+    .picker-card__title {
+      font-size: 1.7rem;
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 10px;
+    }
+    .picker-card__sub {
+      color: var(--text-dim);
+      font-size: .95rem;
+      margin-bottom: 20px;
+    }
+    .picker-card__meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 16px;
+      border-top: 1px solid var(--line-soft);
+      font-size: .82rem;
+      color: var(--text-faint);
+    }
+    .picker-card__go {
+      color: var(--text);
+      font-weight: 700;
+      transition: transform .25s var(--ease);
+    }
+    .picker-card:hover .picker-card__go { transform: translateX(4px); }
+    @media (max-width: 640px) {
+      .picker-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="nav__inner">
+      <a class="brand" href="select.html" aria-label="ORAKEL home">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M3 16c4-7.5 22-7.5 26 0-4 7.5-22 7.5-26 0Z" fill="none" stroke="currentColor" stroke-width="2.2" />
+          <circle cx="16" cy="16" r="4.2" fill="currentColor" />
+        </svg>
+        <span class="brand__name">ORAKEL</span>
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <section class="picker-hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="wrap">
+        <p class="eyebrow" style="justify-content:center;">Choose a competition</p>
+        <h1 class="hero__title">Which call do you<br />want to see?</h1>
+        <p class="hero__sub" style="margin-left:auto;margin-right:auto;text-align:center;">
+          Two models, two competitions — same method underneath.
+        </p>
+      </div>
+    </section>
+
+    <div class="wrap">
+      <div class="picker-grid">
+        <a class="picker-card" href="index.html">
+          <span class="picker-card__tag">Club football</span>
+          <div class="picker-card__title">Bundesliga</div>
+          <p class="picker-card__sub">Weekly matchday predictions for the German top flight, built from season form, head-to-head history, squad availability and matchday weather.</p>
+          <div class="picker-card__meta">
+            <span>18 clubs · Season 2025/26</span>
+            <span class="picker-card__go">Open →</span>
+          </div>
+        </a>
+        <a class="picker-card picker-card--intl" href="international.html">
+          <span class="picker-card__tag">International</span>
+          <div class="picker-card__title">World Cup 2026</div>
+          <p class="picker-card__sub">Knockout-stage predictions built from Elo strength, recent form, squad experience and rest days — no club-level data needed.</p>
+          <div class="picker-card__meta">
+            <span>Round of 16 · live now</span>
+            <span class="picker-card__go">Open →</span>
+          </div>
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="brand brand--footer">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M3 16c4-7.5 22-7.5 26 0-4 7.5-22 7.5-26 0Z" fill="none" stroke="currentColor" stroke-width="2.2" />
+          <circle cx="16" cy="16" r="4.2" fill="currentColor" />
+        </svg>
+        <span class="brand__name">ORAKEL</span>
+      </div>
+      <p class="footer__fine">For research and entertainment. Not betting advice.</p>
+    </div>
+  </footer>
+</body>
+</html>

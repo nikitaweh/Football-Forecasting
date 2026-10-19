@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/fixtures_international.json"
+OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/fixtures_international.json"
 
 # ---------------------------
 # API-Konfiguration
@@ -29,11 +29,12 @@ REQUEST_READ_TIMEOUT = 12
 REQUEST_RETRIES = 2
 REQUEST_BACKOFF_SECONDS = 1.0
 
-# Internationale Wettbewerbe (api-football Liga-IDs)
+# FIFA-Wettbewerbe (api-football Liga-IDs): Weltmeisterschaft + WM-Qualifikation
+# aller Konfoederationen. UEFA-Wettbewerbe (EM, Nations League, EM-Quali) liegen im
+# Zweig International/UEFA/. Nationalmannschafts-Freundschaftsspiele (Liga 10) werden
+# separat im Friendlies/-Unterzweig gesammelt.
 LEAGUE_IDS = {
     1: "World Cup",
-    4: "Euro Championship",
-    5: "UEFA Nations League",
     29: "World Cup - Qualification Africa",
     30: "World Cup - Qualification Asia",
     31: "World Cup - Qualification CONCACAF",
@@ -41,8 +42,6 @@ LEAGUE_IDS = {
     33: "World Cup - Qualification Oceania",
     34: "World Cup - Qualification South America",
     37: "World Cup - Qualification Intercontinental Play-offs",
-    960: "Euro Championship - Qualification",
-    10: "Friendlies",
 }
 START_SEASON = 2017
 

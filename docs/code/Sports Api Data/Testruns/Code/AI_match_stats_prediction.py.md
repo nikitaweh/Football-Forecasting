@@ -299,5 +299,228 @@ Empfohlener Check nach einem Lauf:
 2. `Sports Api Data/Testruns/Datacollection reference/pareto_front.csv` (Decision-Set).
 3. `Sports Api Data/Testruns/Datacollection reference/surrogate_run_history.csv` (Historie inkl. `FeatureSchemaVersion`).
 
+## Aktuelle Code-Referenz
 
+### Ueberblick und Zweck
 
+Erzeugt Spielprognosen und bewertet Ergebniswahrscheinlichkeiten anhand der konfigurierten Modell- und Datenpfade.
+
+Diese Referenz beschreibt den vorhandenen Code statisch; sie ist kein Nachweis eines erfolgreichen Daten- oder Modelllaufs.
+
+### Wichtige Klassen und Funktionen
+
+- `load_weather(path)`
+  Verwendet `os.path.exists`, `pd.DataFrame`, `pd.read_csv`, `w.rename`. Rueckgabe unter anderem: `w`.
+- `coerce_numeric_columns(df_src, columns)`
+  Verwendet `pd.to_numeric`.
+- `summarize_h2h(subset)`
+  Verwendet `float`, `goal_diff.mean`, `subset['GoalsFor'].mean`, `subset['GoalsAgainst'].mean`. Rueckgabe unter anderem: `{'AvgGoalDiff': float(goal_diff.mean()), 'AvgGoalsFor': float(subset['GoalsFor'].mean()), 'AvgGoa...`.
+- `add_h2h_features(df_src)`
+  Verwendet `df_src[df_src['MatchDate'].notna()].copy`, `df_src['MatchDate'].notna`, `base.iterrows`, `pd.isna`. Rueckgabe unter anderem: `pd.DataFrame(out_rows)`.
+- `apply_h2h_scaling(feature_df, k)`
+  Verwendet `feature_df.copy`. Rueckgabe unter anderem: `df_scaled`.
+- `build_player_base_features(df_src)`
+  Verwendet `df_src[['MatchID', 'MatchDate', 'HomeTeamID', 'AwayTeamID', 'HomeTe...`, `os.path.exists`, `pd.DataFrame`, `pd.read_csv`. Rueckgabe unter anderem: `out[result_cols]`.
+- `add_team_asof_features(df_src, team_id_col, prefix)`
+  Verwendet `df_src[df_src['MatchDate'].notna()].copy`, `df_src['MatchDate'].notna`, `base.groupby`, `grp[['MatchID']].copy`. Rueckgabe unter anderem: `out`.
+- `load_reference_results(primary_path, fallback_path=None)`
+  Verwendet `os.path.exists`, `pd.read_csv`, `{'MatchID', 'HomeGoals', 'AwayGoals'}.issubset`, `required.issubset`. Rueckgabe unter anderem: `None`.
+- `read_optional_csv(path)`
+  Verwendet `os.path.exists`, `pd.DataFrame`, `pd.read_csv`. Rueckgabe unter anderem: `pd.DataFrame()`.
+- `first_non_null_value(values, default_value=float('nan'))`
+  Verwendet `float`, `pd.notna`. Rueckgabe unter anderem: `default_value`.
+- `ensure_outcome_probability_metadata(df, mode_default='normal')`
+  Verwendet `df['OutcomeProbabilityMode'].fillna(mode_default).astype`, `df['OutcomeProbabilityMode'].fillna`, `SCORE_PROBABILITY_PARAM_DEFAULTS.items`, `pd.to_numeric(df[col], errors='coerce').fillna`. Rueckgabe unter anderem: `df`.
+- `filter_outcome_probability_config(df, outcome_mode, score_total_scale, score_rho, score_alpha, draw_overlay_alpha=None, draw_overlay_min_prob=None, draw_overlay_max_prob=None, draw_overlay_goaldiff_scale=None, draw_overlay_signal_scale=None, draw_overlay_total_goals_cap=None)`
+  Verwendet `ensure_outcome_probability_metadata`, `df.copy`, `filtered[filtered['OutcomeProbabilityMode'] == outcome_mode].copy`, `pd.to_numeric`. Rueckgabe unter anderem: `filtered`.
+- `outcome_from_goals(home_goals, away_goals)`
+  Verwendet `pd.isna`, `float`. Rueckgabe unter anderem: `'D'`.
+- `prepare_run_summary(summary_df)`
+  Verwendet `summary_df.copy`, `pd.to_numeric`, `prepared['MatchedReferenceCount'].fillna`, `pd.Series`. Rueckgabe unter anderem: `prepared`.
+- `append_to_run_history(history_path, summary_df)`
+  Verwendet `read_optional_csv`, `ensure_outcome_probability_metadata`, `summary_df.copy`, `new_summary.copy`. Rueckgabe unter anderem: `history_updated`.
+- `append_future_vs_reference_metrics(metrics_path, summary_df)`
+  Append a per-run evaluation snapshot when saved future predictions are scored against reference results (AvgNLL/Accuracy). Creates the CSV if missing.
+- `try_backfill_reference_from_future(ref_results)`
+  Verwendet `pd.DataFrame`, `read_optional_csv`, `future_runs.copy`, `ensure_outcome_probability_metadata`. Rueckgabe unter anderem: `(all_pred_df, summary_df)`.
+- `build_prediction_frame(df_src, ref_results, mode, future_limit=9, reference_limit=None)`
+  Verwendet `ValueError`, `pd.Index`, `df_src[df_src['MatchID'].isin(ref_ids)].copy`, `df_src['MatchID'].isin`. Rueckgabe unter anderem: `pred`.
+- `make_match_stats_regressor()`
+  Verwendet `ValueError`, `GradientBoostingRegressor`. Rueckgabe unter anderem: `GradientBoostingRegressor(random_state=RANDOM_STATE)`.
+- `fit_match_stats_estimator(x_train, y_train)`
+  Verwendet `SimpleImputer`, `imputer.fit_transform`, `make_match_stats_regressor`, `model.fit`. Rueckgabe unter anderem: `(imputer, model)`.
+- `postprocess_match_stats(pred_df)`
+  Verwendet `pred_df.copy`, `pd.to_numeric(processed[col], errors='coerce').clip`, `pd.to_numeric`, `{'HomePossession', 'AwayPossession'}.issubset`. Rueckgabe unter anderem: `processed`.
+- `build_match_stats_predictions(train_df, predict_df, feature_cols, target_cols)`
+  Verwendet `pd.DataFrame`, `pd.to_numeric`, `y_full.notna`, `int`. Rueckgabe unter anderem: `(train_pred, predict_pred, summary_df)`.
+- `apply_match_stats_mode(train_df, predict_df, raw_predict_df)`
+  Verwendet `train_df.copy`, `predict_df.copy`, `pd.DataFrame`, `build_match_stats_predictions`. Rueckgabe unter anderem: `(train_enriched, predict_enriched, outcome_features_with_match_stats, predicted_stats_output, mat...`.
+- `resolve_weight_value(weight_map, key, default_value=1.0)`
+  Verwendet `weight_map.get`, `float`, `math.isfinite`. Rueckgabe unter anderem: `value`.
+- `collect_weight_parameter_names(match_stats_mode)`
+  Verwendet `GENERAL_SIGNAL_GROUP_SPECS.values`, `params.extend`. Rueckgabe unter anderem: `params`.
+- `weighted_signal_from_specs(signal_df, specs, weight_map)`
+  Verwendet `pd.Series`, `resolve_weight_value`, `pd.to_numeric`, `spec.get`. Rueckgabe unter anderem: `weighted_sum / total_weight`.
+- `build_outcome_design_matrix(signal_df, weight_map, match_stats_mode)`
+  Verwendet `pd.DataFrame`, `pd.Series`, `GENERAL_SIGNAL_GROUP_SPECS.items`, `weighted_signal_from_specs`. Rueckgabe unter anderem: `design`.
+- `mean_available(values, default_value=1.25)`
+  Verwendet `float`, `pd.notna`, `sum`, `len`. Rueckgabe unter anderem: `float(sum(valid) / len(valid))`.
+- `estimate_scoreline(match_row, predicted_goal_diff, predicted_result)`
+  Verwendet `mean_available`, `match_row.get`, `max`, `int`. Rueckgabe unter anderem: `(float(exp_home), float(exp_away), int(pred_home_goals), int(pred_away_goals))`.
+- `poisson_goal_pmf(lam, max_goals)`
+  Verwendet `max`, `min`, `float`, `math.exp`. Rueckgabe unter anderem: `probs`.
+- `score_distribution_outcome_probs(expected_home_goals, expected_away_goals, mode)`
+  Verwendet `max`, `float`, `poisson_goal_pmf`, `enumerate`. Rueckgabe unter anderem: `(p_home / total, p_draw / total, p_away / total)`.
+- `blend_outcome_probabilities(base_h, base_d, base_a, score_h, score_d, score_a, mode)`
+  Verwendet `any`, `math.isfinite`, `mode.endswith`. Rueckgabe unter anderem: `(p_h / total, p_d / total, p_a / total)`.
+- `apply_score_distribution_probabilities(pred_df)`
+  Verwendet `pred_df.copy`, `adjusted.iterrows`, `score_distribution_outcome_probs`, `blend_outcome_probabilities`. Rueckgabe unter anderem: `adjusted`.
+- `draw_overlay_float(value, default_value=float('nan'))`
+  Verwendet `float`, `math.isfinite`. Rueckgabe unter anderem: `num`.
+- `draw_overlay_clamp(value, low=0.0, high=1.0)`
+  Verwendet `draw_overlay_float`, `max`, `float`, `min`. Rueckgabe unter anderem: `max(float(low), min(float(high), num))`.
+- `draw_overlay_similarity(value, scale)`
+  Verwendet `max`, `draw_overlay_float`, `math.exp`, `abs`. Rueckgabe unter anderem: `math.exp(-abs(draw_overlay_float(value, 0.0)) / scale_value)`.
+- `draw_overlay_weighted_mean(parts, default_value=0.5)`
+  Verwendet `draw_overlay_float`, `math.isfinite`, `float`, `draw_overlay_clamp`. Rueckgabe unter anderem: `draw_overlay_clamp(weighted_sum / total_weight)`.
+- `draw_overlay_pair_similarity(row, home_col, away_col, scale)`
+  Verwendet `row.get`, `float`, `pd.isna`, `draw_overlay_similarity`. Rueckgabe unter anderem: `draw_overlay_similarity(draw_overlay_float(home_value, 0.0) - draw_overlay_float(away_value, 0.0)...`.
+- `draw_overlay_signal_scales(pred_df)`
+  Verwendet `pd.to_numeric(pred_df[col], errors='coerce').abs().dropna`, `pd.to_numeric(pred_df[col], errors='coerce').abs`, `pd.to_numeric`, `float`. Rueckgabe unter anderem: `scales`.
+- `draw_overlay_strength_layer(row, signal_scales)`
+  Verwendet `draw_overlay_similarity`, `row.get`, `parts.append`, `signal_scales.get`. Rueckgabe unter anderem: `draw_overlay_weighted_mean(parts, default_value=0.5)`.
+- `draw_overlay_score_layer(row)`
+  Verwendet `draw_overlay_float`, `row.get`, `math.isfinite`, `draw_overlay_similarity`. Rueckgabe unter anderem: `draw_overlay_weighted_mean([(goal_gap_similarity, 0.7), (high_total_penalty, 0.3)])`.
+- `draw_overlay_stats_layer(row)`
+  Verwendet `draw_overlay_weighted_mean`, `draw_overlay_pair_similarity`. Rueckgabe unter anderem: `draw_overlay_weighted_mean([(draw_overlay_pair_similarity(row, 'HomeXG', 'AwayXG', 0.8), 0.25), (...`.
+- `draw_overlay_discipline_layer(row)`
+  Verwendet `draw_overlay_weighted_mean`, `draw_overlay_pair_similarity`, `row.get`, `float`. Rueckgabe unter anderem: `draw_overlay_weighted_mean([(balance_layer, 0.7), (load_layer, 0.3)])`.
+- `draw_overlay_candidate(row, signal_scales)`
+  Verwendet `draw_overlay_strength_layer`, `draw_overlay_score_layer`, `draw_overlay_stats_layer`, `draw_overlay_discipline_layer`. Rueckgabe unter anderem: `{'DrawOverlay_StrengthLayer': strength_layer, 'DrawOverlay_ScoreLayer': score_layer, 'DrawOverlay...`.
+- `apply_draw_multilayer_overlay(pred_df)`
+  Verwendet `pred_df.copy`, `draw_overlay_signal_scales`, `adjusted.iterrows`, `draw_overlay_float`. Rueckgabe unter anderem: `adjusted`.
+- `apply_outcome_probability_adjustment(pred_df)`
+  Verwendet `apply_score_distribution_probabilities`, `apply_draw_multilayer_overlay`. Rueckgabe unter anderem: `pred_df`.
+- `compute_pareto_front(df, nll_col='AvgNLL', acc_col='Accuracy')`
+  Verwendet `df.dropna(subset=[nll_col, acc_col]).copy`, `df.dropna`, `base.sort_values`, `float`. Rueckgabe unter anderem: `pd.DataFrame(pareto_rows)`.
+- `build_pareto_decision_set(df, target_size=PARETO_TARGET_SIZE)`
+  Verwendet `compute_pareto_front`, `df.copy`, `float`, `pd.to_numeric`. Rueckgabe unter anderem: `decision`.
+- `rank_component(series, smaller_is_better=False)`
+  Verwendet `pd.to_numeric`, `pd.Series`, `float`, `values.notna`. Rueckgabe unter anderem: `ranked`.
+- `build_future_candidate_ranking(df, target_size=PARETO_TARGET_SIZE)`
+  Verwendet `df.copy`, `float`, `pd.to_numeric`, `ranked['Pred_AvgNLL'].notna`. Rueckgabe unter anderem: `decision`.
+- `build_ensemble_outcome_table(all_pred_df, ensemble_run_ids, k_used)`
+  Average top-K runs' per-match predictions into one ensemble outcome table.
+- `drop_empty_weight_columns(df)`
+  Verwendet `df.copy`, `c.startswith`, `cleaned[col].notna().sum`, `cleaned[col].notna`. Rueckgabe unter anderem: `cleaned`.
+- `persist_decision_table(decision_df, output_path)`
+  Verwendet `pd.DataFrame`, `read_optional_csv`, `print`, `decision_df.to_csv`. Rueckgabe unter anderem: `cleaned`.
+- `_safe_float(value, default_value=float('nan'))`
+  Verwendet `float`, `math.isfinite`. Rueckgabe unter anderem: `num`.
+- `_mean_valid(values, default_value=1.0)`
+  Verwendet `float`, `pd.notna`, `sum`, `len`. Rueckgabe unter anderem: `float(sum(valid) / len(valid))`.
+- `_legacy_weight(row, suffix, default_value=float('nan'))`
+  Verwendet `float`, `_safe_float`, `row.get`. Rueckgabe unter anderem: `_safe_float(row.get(f'Weight_{suffix}'), default_value)`.
+- `_history_row_key(row, key_cols)`
+  Verwendet `row.get`, `float`, `pd.isna`, `key.append`. Rueckgabe unter anderem: `tuple(key)`.
+- `migrate_legacy_history_to_hybrid(history_df, target_schema_version)`
+  Verwendet `history_df.copy`, `ensure_outcome_probability_metadata`, `_history_row_key`, `existing_target.iterrows`. Rueckgabe unter anderem: `(updated, len(migrated_rows))`.
+- `ensure_migrated_history_schema(history_path, target_schema_version)`
+  Verwendet `read_optional_csv`, `ensure_outcome_probability_metadata`, `migrate_legacy_history_to_hybrid`, `migrated_history.to_csv`. Rueckgabe unter anderem: `migrated_count`.
+- `load_run_history(path, weight_cols, match_stats_mode, source_prediction_mode=None, feature_schema_version=None, outcome_probability_mode=None, score_probability_total_scale=None, score_probability_rho=None, score_probability_alpha=None, draw_overlay_alpha=None, draw_overlay_min_prob=None, draw_overlay_max_prob=None, draw_overlay_goaldiff_scale=None, draw_overlay_signal_scale=None, draw_overlay_total_goals_cap=None)`
+  Verwendet `os.path.exists`, `pd.DataFrame`, `pd.read_csv`, `ensure_outcome_probability_metadata`. Rueckgabe unter anderem: `hist`.
+- `train_surrogate_model(history_df, feature_cols, target_col)`
+  Verwendet `make_pipeline`, `StandardScaler`, `MLPRegressor`, `GradientBoostingRegressor`. Rueckgabe unter anderem: `model`.
+- `generate_candidate_df(num, weight_parameter_names, k_range)`
+  Verwendet `range`, `random.random`, `random.randint`, `int`. Rueckgabe unter anderem: `pd.DataFrame(rows)`.
+- `select_candidates_with_surrogate(candidates_df, pred_nll, pred_acc, max_runs, random_frac)`
+  Verwendet `candidates_df.copy`, `compute_pareto_front`, `pareto.sort_values`, `int`. Rueckgabe unter anderem: `selected.reset_index(drop=True)`.
+
+### Inputs, Outputs und Seiteneffekte
+
+Direkt im Modul vorkommende Daten- und Prozessoperationen (Ausdruecke behalten lokale Variablennamen):
+
+- `os.environ.get('MAX_RUNS_OVERRIDE', '')`
+- `os.environ.get('BACKTEST_DATE_CUTOFF', '')`
+- `os.environ.get('MATCH_STATS_MODE_OVERRIDE', '')`
+- `os.environ.get('FUTURE_ENSEMBLE_ENABLED', '')`
+- `os.environ.get('FUTURE_ENSEMBLE_K_OVERRIDE', '')`
+- `os.environ.get('DISABLE_PLAYER_WORKLOAD', '')`
+- `os.environ.get('OUTCOME_PROBABILITY_MODE', 'normal')`
+- `os.environ.get('SCORE_PROBABILITY_TOTAL_SCALE', '1.0')`
+- `os.environ.get('SCORE_PROBABILITY_RHO', '0.0')`
+- `os.environ.get('SCORE_PROBABILITY_ALPHA', '1.0')`
+- `os.environ.get('SCORE_PROBABILITY_MAX_GOALS', '10')`
+- `os.environ.get('DRAW_OVERLAY_ALPHA', '0.60')`
+- `os.environ.get('DRAW_OVERLAY_MIN_PROB', '0.14')`
+- `os.environ.get('DRAW_OVERLAY_MAX_PROB', '0.36')`
+- `os.environ.get('DRAW_OVERLAY_GOALDIFF_SCALE', '0.90')`
+- `os.environ.get('DRAW_OVERLAY_SIGNAL_SCALE', '1.00')`
+- `os.environ.get('DRAW_OVERLAY_TOTAL_GOALS_CAP', '2.60')`
+- `pd.read_csv(os.path.join(DATA_PATH, 'match_statistics_filtered_78.csv'))`
+- `pd.read_csv(os.path.join(DATA_PATH, 'Stammdaten_78.csv'))`
+- `pd.read_csv(os.path.join(DATA_PATH, 'Teams_78.csv'))`
+- `pd.read_csv(path)`
+- `safe_read_csv(LINEUPS_PATH)`
+
+### Konfiguration und Environment
+
+- `SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))`
+- `DATA_PATH = 'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'`
+- `TESTRUNS_PATH = 'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns'`
+- `FUTURE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection future')`
+- `REFERENCE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection reference')`
+- `WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')`
+- `LINEUPS_PATH = os.path.join(DATA_PATH, 'lineups_league_78.csv')`
+- `INJURIES_PATH = os.path.join(DATA_PATH, 'injuries_league_78.csv')`
+- `PLAYER_STATS_PATH = os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv')`
+- `INTERNATIONAL_BASE = 'C:/AI Projekt/KI-Projekt/Sports Api Data/International'`
+- `INTERNATIONAL_BRANCHES = ('FIFA', 'UEFA')`
+- `INTERNATIONAL_FIXTURES_PATH = [os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection', 'Stammdaten_international.csv') for b in INTERNATIONAL_BRANCHES]`
+- `INTERNATIONAL_LINEUPS_PATH = [os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection', 'lineups_international.csv') for b in INTERNATIONAL_BRANCHES]`
+- `INTERNATIONAL_PLAYER_STATS_PATH = [os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection', 'player_statistics_per_fixture_international.csv') for b in INTERNATIONAL_BRANCHES]`
+- `MAX_RUNS = 30`
+- `RANDOM_STATE = 42`
+- `BACKTEST_DATE_CUTOFF = pd.to_datetime(_backtest_cutoff_raw) if _backtest_cutoff_raw else None`
+- `PREDICTION_MODE = 'reference'`
+- `REFERENCE_PREDICTION_LIMIT = None`
+- `MATCH_STATS_MODE = 'predicted' if PREDICTION_MODE == 'future' else 'actual'`
+- `MATCH_STATS_MODEL = 'gbr'`
+- `MATCH_STATS_CV_SPLITS = 5`
+- `MATCH_STATS_MIN_ROWS = 25`
+- `PREDICTION_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_runs.csv')`
+- `RUN_SUMMARY_OUT_PATH = os.path.join(OUTPUT_PATH, 'prediction_weight_run_summary.csv')`
+
+### Imports und interne Abhaengigkeiten
+
+- `import math`
+- `import os`
+- `import random`
+- `import sys`
+- `from datetime import datetime`
+- `import pandas as pd`
+- `from bartpy.sklearnmodel import SklearnModel`
+- `from player_workload_features import build_player_workload_index, player_workload_at`
+- `from sklearn.ensemble import GradientBoostingRegressor`
+- `from sklearn.impute import SimpleImputer`
+- `from sklearn.model_selection import KFold, train_test_split`
+- `from sklearn.neural_network import MLPRegressor`
+- `from sklearn.pipeline import make_pipeline`
+- `from sklearn.preprocessing import StandardScaler`
+
+Lokale Imports benoetigen den passenden Modul-Suchpfad; dynamische Imports koennen weitere Dateien laden.
+
+### Kurzes Beispiel
+
+Das Modul wird von der Pipeline importiert. Schnittstellenbeispiel (Signatur, keine ausfuehrbaren Beispieldaten):
+
+```text
+load_weather(path)
+```
+
+### Edge Cases und Hinweise
+
+- Explizit behandelte Fehler: `pd.errors.EmptyDataError`, `(TypeError, ValueError)`.
+- Auswertungen nur auf identischen MatchIDs, Zeitraeumen und Zieldefinitionen vergleichen.
+- Nachtraegliche Wahrscheinlichkeitsvarianten ersetzen keinen zeitlich getrennten Validierungslauf.
+- Fehlende Werte, Join-Verluste und Zahl der ausgewerteten Spiele gemeinsam mit Kennzahlen berichten.

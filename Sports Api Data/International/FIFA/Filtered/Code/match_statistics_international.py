@@ -8,9 +8,9 @@ from apscheduler.triggers.cron import CronTrigger
 # ----------------------------
 # Pfade zu den Input- und Output-Dateien
 # ----------------------------
-fixtures_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/fixtures_international.json"
-stats_file    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/match_statistics_international.json"
-output_csv    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Filtered/Datacollection/match_statistics_filtered_international.csv"
+fixtures_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/fixtures_international.json"
+stats_file    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/match_statistics_international.json"
+output_csv    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Filtered/Datacollection/match_statistics_filtered_international.csv"
 
 # Beendete Spielstatus bei internationalen Spielen (inkl. Verlaengerung/Elfmeterschiessen)
 FINISHED_STATUSES = {"FT", "AET", "PEN"}

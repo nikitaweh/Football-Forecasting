@@ -30,9 +30,20 @@ FINISHED_STATUSES = {'FT', 'AET', 'PEN'}
 RANDOM_STATE = 42
 
 INTERNATIONAL_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = INTERNATIONAL_DIR / 'Filtered' / 'Datacollection'
-RAW_FIXTURES_PATH = INTERNATIONAL_DIR / 'Unfiltered' / 'Datacollection' / 'fixtures_international.json'
-STAMMDATEN_PATH = DATA_DIR / 'Stammdaten_international.csv'
+
+# The data pipeline is split into FIFA and UEFA confederation branches. This stays a
+# single combined model: it reads the competitive Stammdaten/fixtures from BOTH branches
+# and concatenates them. Friendlies live in each branch's separate Friendlies/ subtree
+# and are intentionally NOT read here (they are excluded from COMPETITIVE_LEAGUES anyway).
+BRANCHES = ('FIFA', 'UEFA')
+STAMMDATEN_PATHS = [
+    INTERNATIONAL_DIR / branch / 'Filtered' / 'Datacollection' / 'Stammdaten_international.csv'
+    for branch in BRANCHES
+]
+RAW_FIXTURES_PATHS = [
+    INTERNATIONAL_DIR / branch / 'Unfiltered' / 'Datacollection' / 'fixtures_international.json'
+    for branch in BRANCHES
+]
 DEFAULT_OUTPUT_DIR = INTERNATIONAL_DIR / 'Model Output' / 'competitive'
 
 FEATURE_COLUMNS = [
@@ -116,32 +127,41 @@ def goal_diff_probabilities(predicted_goal_diff, sigma, draw_margin):
 
 
 def load_regulation_results():
-    with RAW_FIXTURES_PATH.open('r', encoding='utf-8') as handle:
-        payload = json.load(handle)
-
     results = {}
-    for item in payload.get('response', []):
-        fixture = item.get('fixture', {})
-        fixture_id = fixture.get('id')
-        status = fixture.get('status', {}).get('short')
-        if fixture_id is None or status not in FINISHED_STATUSES:
+    for fixtures_path in RAW_FIXTURES_PATHS:
+        if not fixtures_path.exists():
             continue
+        with fixtures_path.open('r', encoding='utf-8') as handle:
+            payload = json.load(handle)
 
-        regulation = item.get('score', {}).get('fulltime', {}) or {}
-        home_goals = regulation.get('home')
-        away_goals = regulation.get('away')
-        if home_goals is None or away_goals is None:
-            goals = item.get('goals', {}) or {}
-            home_goals = goals.get('home')
-            away_goals = goals.get('away')
-        if home_goals is None or away_goals is None:
-            continue
-        results[int(fixture_id)] = (float(home_goals), float(away_goals), status)
+        for item in payload.get('response', []):
+            fixture = item.get('fixture', {})
+            fixture_id = fixture.get('id')
+            status = fixture.get('status', {}).get('short')
+            if fixture_id is None or status not in FINISHED_STATUSES:
+                continue
+
+            regulation = item.get('score', {}).get('fulltime', {}) or {}
+            home_goals = regulation.get('home')
+            away_goals = regulation.get('away')
+            if home_goals is None or away_goals is None:
+                goals = item.get('goals', {}) or {}
+                home_goals = goals.get('home')
+                away_goals = goals.get('away')
+            if home_goals is None or away_goals is None:
+                continue
+            results[int(fixture_id)] = (float(home_goals), float(away_goals), status)
     return results
 
 
 def load_competitive_fixtures(as_of):
-    fixtures = pd.read_csv(STAMMDATEN_PATH)
+    frames = [pd.read_csv(path) for path in STAMMDATEN_PATHS if path.exists()]
+    if not frames:
+        raise FileNotFoundError(
+            'No Stammdaten found in any confederation branch: '
+            + ', '.join(str(p) for p in STAMMDATEN_PATHS)
+        )
+    fixtures = pd.concat(frames, ignore_index=True)
     fixtures = fixtures.rename(columns={
         'Date': 'MatchDate',
         'Home Team': 'HomeTeam',

@@ -29,13 +29,24 @@ WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
 LINEUPS_PATH = os.path.join(DATA_PATH, 'lineups_league_78.csv')
 INJURIES_PATH = os.path.join(DATA_PATH, 'injuries_league_78.csv')
 PLAYER_STATS_PATH = os.path.join(DATA_PATH, 'player_statistics_per_fixture_league_78.csv')
-INTERNATIONAL_DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/International/Filtered/Datacollection'
-INTERNATIONAL_FIXTURES_PATH = os.path.join(INTERNATIONAL_DATA_PATH, 'Stammdaten_international.csv')
-INTERNATIONAL_LINEUPS_PATH = os.path.join(INTERNATIONAL_DATA_PATH, 'lineups_international.csv')
-INTERNATIONAL_PLAYER_STATS_PATH = os.path.join(
-    INTERNATIONAL_DATA_PATH,
-    'player_statistics_per_fixture_international.csv'
-)
+# International data is split into FIFA and UEFA confederation branches. The player
+# workload builder concatenates both branches' competitive Filtered CSVs (friendlies
+# live in a separate Friendlies/ subtree and are excluded from the workload anyway).
+INTERNATIONAL_BASE = r'C:/AI Projekt/KI-Projekt/Sports Api Data/International'
+INTERNATIONAL_BRANCHES = ('FIFA', 'UEFA')
+INTERNATIONAL_FIXTURES_PATH = [
+    os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection', 'Stammdaten_international.csv')
+    for b in INTERNATIONAL_BRANCHES
+]
+INTERNATIONAL_LINEUPS_PATH = [
+    os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection', 'lineups_international.csv')
+    for b in INTERNATIONAL_BRANCHES
+]
+INTERNATIONAL_PLAYER_STATS_PATH = [
+    os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection',
+                 'player_statistics_per_fixture_international.csv')
+    for b in INTERNATIONAL_BRANCHES
+]
 MAX_RUNS = 30
 RANDOM_STATE = 42
 random.seed(RANDOM_STATE)
@@ -57,7 +68,7 @@ BACKTEST_DATE_CUTOFF = pd.to_datetime(_backtest_cutoff_raw) if _backtest_cutoff_
 # === PREDICTION TARGET SWITCH ===
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
-PREDICTION_MODE = 'reference'
+PREDICTION_MODE = 'future'
 REFERENCE_PREDICTION_LIMIT = None
 
 # === MATCH STATS SWITCH ===

@@ -8,8 +8,8 @@ from apscheduler.triggers.cron import CronTrigger
 # ----------------------------
 # Pfade anpassen
 # ----------------------------
-input_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/player_statistics_per_fixture_international.json"
-output_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Filtered/Datacollection/player_statistics_per_fixture_international.csv"
+input_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/player_statistics_per_fixture_international.json"
+output_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Filtered/Datacollection/player_statistics_per_fixture_international.csv"
 
 # ----------------------------
 # Funktion: JSON zu CSV konvertieren

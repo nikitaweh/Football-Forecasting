@@ -20,18 +20,44 @@ python -m http.server 8000
 
 ## Files
 
-| File              | Purpose                                                       |
-|-------------------|---------------------------------------------------------------|
-| `index.html`      | Page structure                                                |
-| `styles.css`      | Minimalist dark theme                                         |
-| `app.js`          | Renders results & predictions from the data                   |
-| `data.js`         | **Auto-generated** match data — do not edit by hand           |
-| `build_data.py`   | Regenerates `data.js` from the model's CSV exports            |
-| `refresh_data.py` | Unattended refresh (Task Scheduler) — rebuilds on CSV change  |
-| `config/leagues/` | Per-league config: name, team map, CSV source paths           |
-| `logos/`          | Club logos (`<team-id>.png`, from media.api-sports.io)        |
-| `matchdays/`      | Saved per-matchday CSV snapshots (`md<N>_*.csv`)              |
-| `mobile/`         | Phone-scale build (app-shell + bottom tab bar)                |
+| File                            | Purpose                                                       |
+|----------------------------------|---------------------------------------------------------------|
+| `select.html`                    | Competition picker — choose Bundesliga or World Cup 2026      |
+| `index.html`                     | Bundesliga dashboard page                                     |
+| `international.html`             | World Cup 2026 dashboard page                                 |
+| `styles.css`                     | Minimalist dark theme (shared by all pages)                   |
+| `app.js`                         | Renders results & predictions from the data (shared)          |
+| `data.js`                        | **Auto-generated** Bundesliga match data — do not edit by hand |
+| `data.international.js`          | **Auto-generated** World Cup match data — do not edit by hand |
+| `build_data.py`                  | Regenerates `data.js` from the Bundesliga model's CSV exports  |
+| `build_data_international.py`    | Regenerates `data.international.js` from the WC 2026 snapshot |
+| `refresh_data.py`                | Unattended refresh (Task Scheduler) — rebuilds on CSV change  |
+| `config/leagues/`                | Per-league config: name, team map, CSV source paths           |
+| `logos/`                         | Club logos (`<team-id>.png`, from media.api-sports.io)        |
+| `matchdays/`                     | Saved per-matchday CSV snapshots (`md<N>_*.csv`)              |
+| `mobile/`                        | Phone-scale build (app-shell + bottom tab bar)                |
+
+### World Cup 2026 dashboard
+
+`international.html` is a second dashboard, reusing the same `app.js` and
+`styles.css`, but reading `data.international.js` instead of `data.js`.
+It's reached by choosing "World Cup 2026" on `select.html` (or the
+"Change competition" link in either dashboard's nav).
+
+Unlike the Bundesliga pipeline, it does **not** go through
+`build_data.py` / `config/leagues/` — the source CSV
+(`Sports Api Data/International/FIFA/Backtesting/worldcup_2026/wc_predictions_asof_*.csv`)
+already carries its own Stage/Season columns, so no Stammdaten join is
+needed. National-team badge colours/abbreviations are hardcoded in
+`build_data_international.py` (no flag images yet, so teams fall back to
+a coloured abbreviation crest). Rebuild after a newer snapshot appears:
+
+```powershell
+python website/build_data_international.py
+```
+
+This is **not** wired into `refresh_data.py` yet — no scheduled
+auto-refresh for the international data, rebuild manually for now.
 
 ## Refreshing the data
 
@@ -43,26 +69,27 @@ a results update) it rebuilds `data.js`, snapshots the inputs to
 `matchdays/md<N>_*.csv`, and logs to `logs/website_refresh.log` at the repo
 root. Unchanged sources are a quiet no-op (one heartbeat log line per day).
 
-### Pushing to the live site (IONOS)
+### Pushing to the live site (Hostinger)
 
 `refresh_data.py` can also upload the freshly rebuilt `data.js` straight to
-the IONOS webspace over SFTP, so the automatic 10-minute refresh keeps the
+the Hostinger web hosting over SFTP, so the automatic 10-minute refresh keeps the
 live site in sync too -- not just the local checkout.
 
 Setup (one-time):
 
 1. Install the SFTP dependency into the same Python environment the
    scheduled task uses: `pip install paramiko`
-2. Copy `website/config/ionos_sftp.example.json` to
-   `website/config/ionos_sftp.json` and fill in the real host/user/password
-   (from IONOS: Hosting → SFTP → "Sichere FTP-Zugänge verwalten") and
-   `remote_dir` (the connected document root, e.g. `/public`).
-3. That's it -- `ionos_sftp.json` is gitignored and never gets committed.
+2. Copy `website/config/hosting_sftp.example.json` to
+   `website/config/hosting_sftp.json` and fill in the real host/port/user/password
+   (from hPanel: Websites → Dashboard → Files → SFTP details; Hostinger's
+   SFTP port is 65002, not 22) and `remote_dir` (the site's document root,
+   e.g. `/home/<user>/domains/<domain>/public_html`).
+3. That's it -- `hosting_sftp.json` is gitignored and never gets committed.
    If it's missing, `refresh_data.py` just skips the upload (local-only mode).
 
 Every run that rebuilds `data.js` (i.e. sources changed) now also pushes
 that one file to the server. Everything else (`index.html`, `logos/`,
-`mobile/`, ...) still needs a manual upload via the IONOS Webspace Explorer
+`mobile/`, ...) still needs a manual upload via the Hostinger File Manager (or the Hostinger plugin's static-site deploy)
 whenever it changes -- which is rare (new season, new team, layout tweaks).
 A failed upload is logged but never fails the run: the local `data.js` is
 always correct, only the live copy might lag until the next successful push.

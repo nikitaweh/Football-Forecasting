@@ -286,3 +286,84 @@ python "Sports Api Data/Testruns/Code/analyze_backtest_results.py"
 - Wenn weitere Kennzahlen relevant werden, sollten sie zuerst in `season_summary.csv` geschrieben werden.
 - Danach ist eine textuelle Ausgabe sinnvoll.
 - Umgekehrt waere es schlechter wartbar, nur neue `print()`-Zeilen zu ergaenzen.
+
+## Aktuelle Code-Referenz
+
+### Ueberblick und Zweck
+
+analyze_backtest_results.py - aggregate per-matchday backtest outputs into a season-level summary and diagnostic report.
+
+Diese Referenz beschreibt den vorhandenen Code statisch; sie ist kein Nachweis eines erfolgreichen Daten- oder Modelllaufs.
+
+### Wichtige Klassen und Funktionen
+
+- `load_actual_results_by_matchday()`
+  Return a DataFrame of all played, stats-covered matches: MatchID, MD, Result.
+- `load_bookmaker_match_nll()`
+  Return {MatchID: bookie_match_nll} using the most recent BWIN odds file.
+- `naive_match_nll(result)`
+  Verwendet `NAIVE_PRIOR.get`, `float`, `math.log`. Rueckgabe unter anderem: `-math.log(p)`.
+- `matchday_bookie_baseline(match_ids, results, bookie_nll_map)`
+  Mean per-match NLL using bookie odds where available, naive prior otherwise.
+- `fmt(x, digits=4)`
+  Verwendet `pd.isna`. Rueckgabe unter anderem: `f'{x:.{digits}f}'`.
+- `main()`
+  Verwendet `BACKTEST_DIR.exists`, `print`, `sorted`, `BACKTEST_DIR.iterdir`. Rueckgabe unter anderem: `-math.log(max(float(p), 1e-12))`.
+
+### Inputs, Outputs und Seiteneffekte
+
+Direkt im Modul vorkommende Daten- und Prozessoperationen (Ausdruecke behalten lokale Variablennamen):
+
+- `pd.read_csv(STAMMDATEN_PATH, parse_dates=['Date'])`
+- `pd.read_csv(STATS_PATH)`
+- `pd.read_csv(latest)`
+- `NAIVE_PRIOR.get(result)`
+- `bookie_nll_map.get(int(mid))`
+- `pd.read_csv(summary_path)`
+- `summary.get('AvgNLL')`
+- `summary.get('Accuracy')`
+- `pd.read_csv(runs_path)`
+- `pd.read_csv(ensemble_path)`
+- `row.get('ActualResult')`
+- `row.get('WinProb')`
+- `row.get('DrawProb')`
+- `row.get('LoseProb')`
+- `row.get(c)`
+- `season.to_csv(SUMMARY_OUT_PATH, index=False)`
+
+### Konfiguration und Environment
+
+- `SEASON = 2025`
+- `TESTRUNS_PATH = Path('C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns')`
+- `DATA_PATH = Path('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection')`
+- `BACKTEST_DIR = TESTRUNS_PATH / 'Datacollection backtest'`
+- `STAMMDATEN_PATH = DATA_PATH / 'Stammdaten_78.csv'`
+- `STATS_PATH = DATA_PATH / 'match_statistics_filtered_78.csv'`
+- `ODDS_DIR = TESTRUNS_PATH / 'BWIN Odds' / 'Datacollection'`
+- `SUMMARY_OUT_PATH = BACKTEST_DIR / 'season_summary.csv'`
+- `NAIVE_PRIOR = {'H': 0.45, 'D': 0.25, 'A': 0.3}`
+
+### Imports und interne Abhaengigkeiten
+
+- `import math`
+- `from pathlib import Path`
+- `import pandas as pd`
+
+Lokale Imports benoetigen den passenden Modul-Suchpfad; dynamische Imports koennen weitere Dateien laden.
+
+### Kurzes Beispiel
+
+Aufruf aus dem Repository-Hauptverzeichnis mit eingerichteter Python-Umgebung:
+
+```powershell
+python "Sports Api Data/Testruns/Code/analyze_backtest_results.py"
+```
+
+Der Aufruf verwendet die im Skript gesetzten Defaults; die oben genannten Schreib-, Netzwerk- oder Scheduler-Operationen koennen dabei ausgefuehrt werden.
+
+### Edge Cases und Hinweise
+
+- Explizit behandelte Fehler: `ValueError`, `pd.errors.EmptyDataError`, `(TypeError, ValueError)`.
+- Auswertungen nur auf identischen MatchIDs, Zeitraeumen und Zieldefinitionen vergleichen.
+- Nachtraegliche Wahrscheinlichkeitsvarianten ersetzen keinen zeitlich getrennten Validierungslauf.
+- Fehlende Werte, Join-Verluste und Zahl der ausgewerteten Spiele gemeinsam mit Kennzahlen berichten.

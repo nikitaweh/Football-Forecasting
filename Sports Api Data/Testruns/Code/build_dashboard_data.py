@@ -299,6 +299,52 @@ def export_international():
     return len(df)
 
 
+def export_international_odds():
+    """Long per (game x bookmaker) table of international odds for the Intl-games
+    tab: implied 1X2 probs (overround removed) + bookie NLL/pick vs the actual
+    result. Reads the newest worldcup_odds_<book>_*.csv per bookmaker, so freshly
+    downloaded odds flow straight into the dashboard on the next refresh.
+    """
+    books = ['bet365', 'betfair_exchange', 'avg', 'max']
+    rows = []
+    for bk in books:
+        files = sorted(agg.ODDS_DIR.glob(f'worldcup_odds_{bk}_*.csv')) if agg.ODDS_DIR.exists() else []
+        if not files:
+            continue
+        df = pd.read_csv(files[-1])  # newest snapshot
+        for _, r in df.iterrows():
+            mid = pd.to_numeric(r.get('match_id'), errors='coerce')
+            if pd.isna(mid):
+                continue
+            oh, od, oa = (pd.to_numeric(r.get(c), errors='coerce')
+                          for c in ('odd_home_win_1', 'odd_draw_x', 'odd_away_win_2'))
+            if pd.isna(oh) or pd.isna(od) or pd.isna(oa) or min(oh, od, oa) <= 0:
+                continue
+            ph, pdw, pa = 1.0 / oh, 1.0 / od, 1.0 / oa
+            z = ph + pdw + pa  # overround
+            ph, pdw, pa = ph / z, pdw / z, pa / z
+            res = str(r.get('result') or '').strip().upper()
+            probs = {'H': ph, 'D': pdw, 'A': pa}
+            if res in probs:
+                bnll = -math.log(max(probs[res], 1e-12))
+                pick = max(probs, key=probs.get)
+                correct = bool(pick == res)
+            else:
+                bnll, pick, correct = float('nan'), None, None
+            rows.append({
+                'MatchID': int(mid), 'Bookmaker': bk,
+                'Competition': r.get('league'), 'MatchDate': r.get('match_date'),
+                'HomeTeam': r.get('home_team'), 'AwayTeam': r.get('away_team'),
+                'Result': res or None,
+                'OddH': oh, 'OddD': od, 'OddA': oa,
+                'BookieWinProb': ph, 'BookieDrawProb': pdw, 'BookieLoseProb': pa,
+                'BookieNLL': bnll, 'BookiePick': pick, 'BookieCorrect': correct,
+            })
+    out = pd.DataFrame(rows)
+    out.to_csv(OUT_DIR / 'international_odds.csv', index=False)
+    return out['Bookmaker'].nunique() if not out.empty else 0
+
+
 def export_dixon(res_map, bookie_nll_map):
     """Season-wide post-hoc Dixon-Coles: per-matchday table + pooled per-outcome.
 
@@ -449,6 +495,7 @@ def main():
     n_mode, n_runs = export_mode_and_runs(res_map, bookie_nll_map, matches_df)
     n_outcome = export_per_outcome_nll(res_map, bookie_df)
     n_intl = export_international()
+    n_intl_odds = export_international_odds()
     n_dixon = export_dixon(res_map, bookie_nll_map)
     n_modes = export_mode_curve(res_map, bookie_nll_map, matches_df, bookie_df)
 
@@ -459,13 +506,15 @@ def main():
         'counts': {
             'matchdays': n_md, 'mode_folders': n_mode, 'run_rows': n_runs,
             'per_outcome_rows': n_outcome, 'international_matches': n_intl,
+            'international_odds_books': n_intl_odds,
             'dixon_matchdays': n_dixon, 'mode_curve_modes': n_modes,
         },
     }
     (OUT_DIR / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
 
     print(f'  matchdays={n_md}  mode_folders={n_mode}  runs={n_runs}  '
-          f'per_outcome={n_outcome}  international={n_intl}  dixon={n_dixon}  modes={n_modes}')
+          f'per_outcome={n_outcome}  international={n_intl}  intl_odds_books={n_intl_odds}  '
+          f'dixon={n_dixon}  modes={n_modes}')
     print(f'  manifest fingerprint = {manifest["source_fingerprint"]}')
     print('Done.')
 

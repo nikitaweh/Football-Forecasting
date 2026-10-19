@@ -285,3 +285,85 @@ Output-Spalten in der temporeren Referenzdatei:
 - Das Skript ist methodisch sinnvoll, weil es Leakage aktiv begrenzt.
 - Es bleibt aber absichtlich pragmatisch und arbeitet mit globalen Dateien.
 - Das macht es einfach einsetzbar, aber nicht vollstaendig nebenlaeufig oder transaktionssicher.
+
+## Aktuelle Code-Referenz
+
+### Ueberblick und Zweck
+
+backtest_matchdays.py - historical matchday backtest harness.
+
+Diese Referenz beschreibt den vorhandenen Code statisch; sie ist kein Nachweis eines erfolgreichen Daten- oder Modelllaufs.
+
+### Wichtige Klassen und Funktionen
+
+- `load_matchday_index()`
+  Return Stammdaten rows for the season's played matches that have stats.
+- `matchday_fixtures(sd, ms, matchday)`
+  Build the (fixtures-with-results, earliest-date) tuple for a matchday.
+- `run_one_matchday(matchday, fixtures, cutoff_date, max_runs, match_stats_mode)`
+  Run the pipeline for one matchday, copying outputs to a per-matchday folder.
+- `main()`
+  Verwendet `argparse.ArgumentParser`, `parser.add_mutually_exclusive_group`, `group.add_argument`, `parser.add_argument`.
+
+### Inputs, Outputs und Seiteneffekte
+
+Direkt im Modul vorkommende Daten- und Prozessoperationen (Ausdruecke behalten lokale Variablennamen):
+
+- `pd.read_csv(STAMMDATEN_PATH, parse_dates=['Date'])`
+- `pd.read_csv(STATS_PATH)`
+- `fixtures.to_csv(ref_path, index=False)`
+- `subprocess.run([sys.executable, str(SCRIPT_PATH)], env=env, capture_output=True, text=True, encoding='utf-8', errors='replace')`
+- `(target_dir / 'stderr.log').write_text(result.stderr or '', encoding='utf-8')`
+- `(target_dir / 'stdout.log').write_text(result.stdout or '', encoding='utf-8')`
+- `shutil.copy2(src, target_dir / fname)`
+- `(target_dir / 'meta.txt').write_text(f'Matchday: {matchday}\nCutoff: {cutoff_date.date()}\nFixtures: {len(fixtures)}\nOutputs copied: {copied}\n', encoding='utf-8')`
+
+### Konfiguration und Environment
+
+- `SEASON = 2025`
+- `TESTRUNS_PATH = Path('C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns')`
+- `DATA_PATH = Path('C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection')`
+- `SCRIPT_PATH = TESTRUNS_PATH / 'Code' / 'AI_match_stats_prediction.py'`
+- `REFERENCE_DIR = TESTRUNS_PATH / 'Datacollection reference'`
+- `BACKTEST_DIR = TESTRUNS_PATH / 'Datacollection backtest'`
+- `STAMMDATEN_PATH = DATA_PATH / 'Stammdaten_78.csv'`
+- `STATS_PATH = DATA_PATH / 'match_statistics_filtered_78.csv'`
+- `OUTPUT_FILES = ['prediction_weight_runs.csv', 'prediction_weight_run_summary.csv', 'pareto_front.csv', 'future_outcome_table_ensemble.csv']`
+- `DEFAULT_MAX_RUNS = 50`
+- `DEFAULT_MATCH_STATS_MODE = 'predicted'`
+- `group.add_argument('--all', action='store_true', help='Backtest every played matchday in the season.')`
+- `group.add_argument('--matchdays', nargs='+', type=int, help='Backtest specific matchdays (e.g. --matchdays 5 10 15).')`
+- `group.add_argument('--random', type=int, metavar='N', help='Backtest N randomly chosen matchdays.')`
+- `parser.add_argument('--seed', type=int, default=42, help='Random seed for --random.')`
+- `parser.add_argument('--max-runs', type=int, default=DEFAULT_MAX_RUNS, help=f'BART weight-sample iterations per matchday (default: {DEFAULT_MAX_RUNS}).')`
+- `parser.add_argument('--match-stats-mode', default=DEFAULT_MATCH_STATS_MODE, choices=['predicted', 'actual', 'off'], help=f'Match-stats mode for the outcome model (default: {DEFAULT_MATCH_STATS_MODE}). "predicted" avoids post-match leakage; "actual" uses rea...`
+
+### Imports und interne Abhaengigkeiten
+
+- `import argparse`
+- `import os`
+- `import random`
+- `import shutil`
+- `import subprocess`
+- `import sys`
+- `from pathlib import Path`
+- `import pandas as pd`
+
+Lokale Imports benoetigen den passenden Modul-Suchpfad; dynamische Imports koennen weitere Dateien laden.
+
+### Kurzes Beispiel
+
+Aufruf aus dem Repository-Hauptverzeichnis mit eingerichteter Python-Umgebung:
+
+```powershell
+python "Sports Api Data/Testruns/Code/backtest_matchdays.py"
+```
+
+Der Aufruf verwendet die im Skript gesetzten Defaults; die oben genannten Schreib-, Netzwerk- oder Scheduler-Operationen koennen dabei ausgefuehrt werden.
+
+### Edge Cases und Hinweise
+
+- Keine expliziten `except`-Handler im Modul; Fehler koennen an den Aufrufer weitergegeben werden.
+- Auswertungen nur auf identischen MatchIDs, Zeitraeumen und Zieldefinitionen vergleichen.
+- Nachtraegliche Wahrscheinlichkeitsvarianten ersetzen keinen zeitlich getrennten Validierungslauf.
+- Fehlende Werte, Join-Verluste und Zahl der ausgewerteten Spiele gemeinsam mit Kennzahlen berichten.

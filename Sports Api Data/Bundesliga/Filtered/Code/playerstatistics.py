@@ -41,8 +41,15 @@ def convert_player_statistics_to_csv():
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Unerwartetes Format: 'response' ist keine Liste.")
         return
 
+    skipped = []
     for outer in outer_list:
-        MatchID = outer.get('parameters', {}).get('fixture') or outer.get('fixture_id')
+        # API-Fehlerantworten (z. B. Rate-Limit) haben 'parameters': [] und keine Daten
+        if outer.get('errors'):
+            skipped.append(outer.get('fixture_id'))
+            continue
+        params = outer.get('parameters')
+        params = params if isinstance(params, dict) else {}
+        MatchID = params.get('fixture') or outer.get('fixture_id')
         responses = outer.get('response', [])
         if not isinstance(responses, list):
             continue
@@ -142,6 +149,9 @@ def convert_player_statistics_to_csv():
                     'Substitute': substitute,
                     'Captain': captain
                 })
+
+    if skipped:
+        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {len(skipped)} Fixtures mit API-Fehler übersprungen: {skipped}")
 
     # Schreibe CSV
     if rows:

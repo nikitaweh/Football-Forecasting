@@ -1,0 +1,9 @@
+Matchday: 27
+Cutoff: 2026-03-20
+Fixtures: 9
+MAX_RUNS: 50
+MATCH_STATS_MODE: predicted
+OUTCOME_PROBABILITY_MODE: normal
+Pipeline return code: 0
+Outputs copied: 4
+Best summary row: RunID=42, AvgNLL=0.794408, Accuracy=0.5555555555555556

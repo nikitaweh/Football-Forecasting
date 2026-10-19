@@ -4,7 +4,9 @@ git
 .vscode/
 __pycache__/
 .python311-embed/
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/skills/
 C:\AI Projekt\KI-Projekt\.venv\Lib\site-packages\APScheduler-3.11.0.dist-info/
 
 
@@ -18,4 +20,9 @@ __pycache__/
 Supportdateien/
 .codex/
 logs/
+website/config/hosting_sftp.json
+# legacy pre-Hostinger credentials; keep ignored until the file is deleted
 website/config/ionos_sftp.json
+
+# Pre-run data backups
+*.bak

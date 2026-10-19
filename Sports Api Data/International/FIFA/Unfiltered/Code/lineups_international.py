@@ -11,8 +11,8 @@ from apscheduler.triggers.cron import CronTrigger
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-FIXTURES_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/fixtures_international.json"
-OUTPUT_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/lineups_international.json"
+FIXTURES_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/fixtures_international.json"
+OUTPUT_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/lineups_international.json"
 
 API_HOST = "v3.football.api-sports.io"
 BASE_URL = f"https://{API_HOST}"

@@ -254,6 +254,25 @@ intl_outcome_bar <- function(df) {
     plotly::layout(showlegend = FALSE)
 }
 
+# ── Intl games: per-game NLL delta, model vs a chosen bookmaker ──────────────
+intl_games_delta_plot <- function(j, bk_label = "bookie") {
+  if (is.null(j) || !nrow(j)) return(empty_plot("No games with odds under this filter"))
+  j <- j[is.finite(j$NLL) & is.finite(j$BookieNLL), , drop = FALSE]
+  if (!nrow(j)) return(empty_plot("No games with odds under this filter"))
+  j$Delta <- j$NLL - j$BookieNLL
+  j$Matchup <- paste0(j$HomeTeam, " v ", j$AwayTeam)
+  j <- j[order(j$Delta), ]
+  j$Matchup <- factor(j$Matchup, levels = j$Matchup)
+  p <- plot_ly(j, x = ~Matchup, y = ~Delta, type = "bar",
+               marker = list(color = ifelse(j$Delta <= 0, PAL$good, PAL$bad)),
+               text = ~paste0("actual ", Outcome, "  ·  model ", sprintf("%.2f", NLL),
+                              " vs ", bk_label, " ", sprintf("%.2f", BookieNLL)),
+               hovertemplate = "%{x}<br>Δ %{y:+.3f}<br>%{text}<extra></extra>")
+  plotly_base(p, ylab = paste0("model − ", bk_label, " NLL  (negative = model better)"),
+              xlab = NULL, hovermode = "closest") |>
+    plotly::layout(showlegend = FALSE, xaxis = list(tickangle = -45, automargin = TRUE))
+}
+
 # ── International: multiclass reliability diagram ─────────────────────────────
 # Pools the 3 class probabilities; bins predicted prob, plots mean predicted vs
 # observed frequency. On the diagonal = well calibrated.

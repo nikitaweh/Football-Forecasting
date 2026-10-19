@@ -5,19 +5,21 @@ import time
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+# FIFA branch pipeline: this file lives at International/FIFA/Code/, one level deeper
+# than the old International/Code/, so the project root is now parents[4].
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 PATHS = {
-    "fixtures_unfiltered": r"Sports Api Data\International\Unfiltered\Code\Fixtures International.py",
-    "stammdaten_filtered": r"Sports Api Data\International\Filtered\Code\Stammdaten_international.py",
-    "injuries_unfiltered": r"Sports Api Data\International\Unfiltered\Code\injuries_international.py",
-    "injuries_filtered": r"Sports Api Data\International\Filtered\Code\injuries_international.py",
-    "lineups_unfiltered": r"Sports Api Data\International\Unfiltered\Code\lineups_international.py",
-    "lineups_filtered": r"Sports Api Data\International\Filtered\Code\lineups_international.py",
-    "matchstats_unfiltered": r"Sports Api Data\International\Unfiltered\Code\match_statistics_international.py",
-    "matchstats_filtered": r"Sports Api Data\International\Filtered\Code\match_statistics_international.py",
-    "playerstats_unfiltered": r"Sports Api Data\International\Unfiltered\Code\player_statistics_international.py",
-    "playerstats_filtered": r"Sports Api Data\International\Filtered\Code\playerstatistics_international.py",
+    "fixtures_unfiltered": r"Sports Api Data\International\FIFA\Unfiltered\Code\Fixtures International.py",
+    "stammdaten_filtered": r"Sports Api Data\International\FIFA\Filtered\Code\Stammdaten_international.py",
+    "injuries_unfiltered": r"Sports Api Data\International\FIFA\Unfiltered\Code\injuries_international.py",
+    "injuries_filtered": r"Sports Api Data\International\FIFA\Filtered\Code\injuries_international.py",
+    "lineups_unfiltered": r"Sports Api Data\International\FIFA\Unfiltered\Code\lineups_international.py",
+    "lineups_filtered": r"Sports Api Data\International\FIFA\Filtered\Code\lineups_international.py",
+    "matchstats_unfiltered": r"Sports Api Data\International\FIFA\Unfiltered\Code\match_statistics_international.py",
+    "matchstats_filtered": r"Sports Api Data\International\FIFA\Filtered\Code\match_statistics_international.py",
+    "playerstats_unfiltered": r"Sports Api Data\International\FIFA\Unfiltered\Code\player_statistics_international.py",
+    "playerstats_filtered": r"Sports Api Data\International\FIFA\Filtered\Code\playerstatistics_international.py",
 }
 
 MODULE_CACHE = {}
@@ -98,7 +100,7 @@ def run_playerstats_pipeline():
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Kombinierte International-Pipeline (WM/EM inkl. Qualifikation, Nations League, Freundschaftsspiele): "
+            "FIFA-Pipeline (Weltmeisterschaft inkl. Qualifikation aller Konfoederationen): "
             "API-Abruf (Unfiltered) + direkte Filterausgabe (Filtered)"
         )
     )
@@ -130,7 +132,7 @@ def main():
         "playerstats": run_playerstats_pipeline,
     }
 
-    print("International Combined Pipeline gestartet")
+    print("FIFA Pipeline gestartet")
     print(f"Projekt: {PROJECT_ROOT}")
     print(f"Schritte: {args.steps}")
     print(f"Fixtures-Modus: {args.fixtures_mode}")

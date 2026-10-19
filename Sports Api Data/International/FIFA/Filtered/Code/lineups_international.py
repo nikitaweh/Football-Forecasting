@@ -9,9 +9,9 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/lineups_international.json"
-FIXTURES_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/fixtures_international.json"
-OUTPUT_CSV = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Filtered/Datacollection/lineups_international.csv"
+INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/lineups_international.json"
+FIXTURES_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/fixtures_international.json"
+OUTPUT_CSV = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Filtered/Datacollection/lineups_international.csv"
 
 
 def load_fixture_team_map():

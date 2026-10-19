@@ -13,8 +13,8 @@ from urllib3.util.retry import Retry
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-INPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/fixtures_international.json"
-OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/match_statistics_international.json"
+INPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/fixtures_international.json"
+OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/match_statistics_international.json"
 
 # ---------------------------
 # API-Konfiguration

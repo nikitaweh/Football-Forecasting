@@ -9,8 +9,8 @@ from apscheduler.triggers.cron import CronTrigger
 # ---------------------------
 # Dateipfade (anpassen)
 # ---------------------------
-INPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Unfiltered/Datacollection/fixtures_international.json"
-OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/Filtered/Datacollection/Stammdaten_international.csv"
+INPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Unfiltered/Datacollection/fixtures_international.json"
+OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/Filtered/Datacollection/Stammdaten_international.csv"
 
 # ---------------------------
 # Funktion zur Konvertierung der Stammdaten

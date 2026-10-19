@@ -26,6 +26,13 @@ WORKLOAD_INDEX_CAP = 2.0
 
 
 def _safe_read_csv(path):
+    # Accept a single path or an iterable of paths. Competitive international data is
+    # split across confederation branches (International/FIFA, International/UEFA), so
+    # callers pass the branch files as a list and they are concatenated back together.
+    if isinstance(path, (list, tuple)):
+        frames = [_safe_read_csv(p) for p in path]
+        frames = [f for f in frames if not f.empty]
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if not path or not os.path.exists(path):
         return pd.DataFrame()
     try:

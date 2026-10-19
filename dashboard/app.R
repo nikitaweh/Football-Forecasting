@@ -166,6 +166,31 @@ ui <- page_navbar(
     card(card_header("Probability calibration (reliability)"), plotlyOutput("intl_calib", height = 340))
   ),
 
+  # ── International: per-game comparison vs bookmaker ──
+  nav_panel(
+    "Intl games",
+    layout_columns(
+      fill = FALSE, col_widths = c(6, 3, 3),
+      selectizeInput("ig_comp", "Competitions", choices = NULL, multiple = TRUE, width = "100%"),
+      selectInput("ig_book", "Bookmaker", choices = c("bet365", "betfair_exchange", "avg", "max")),
+      div(class = "small text-muted mt-2",
+          "Bars compare each game (with odds) to the bookmaker; the table below lists every game. Scroll down.")
+    ),
+    layout_columns(
+      fill = FALSE, col_widths = c(3, 3, 3, 3),
+      kpi("Games vs odds", "ig_n", "model & bookmaker"),
+      kpi("Model NLL", "ig_mnll", "those games"),
+      kpi("Bookmaker NLL", "ig_bnll", "same games"),
+      kpi("Model beats book", "ig_beats", "per game")
+    ),
+    card(
+      card_header("Model vs bookmaker · per-game NLL delta"),
+      plotlyOutput("ig_delta", height = "60vh"),
+      full_screen = TRUE
+    ),
+    card(card_header("All international games"), DTOutput("ig_table"))
+  ),
+
   # ── Status ──
   nav_panel(
     "Status",
@@ -191,6 +216,7 @@ server <- function(input, output, session) {
   dixon_r     <- make_reader(session, "dixon_performance.csv")
   dixon_po_r  <- make_reader(session, "dixon_per_outcome.csv")
   mode_curve_r <- make_reader(session, "mode_curve.csv")
+  intl_odds_r  <- make_reader(session, "international_odds.csv")
   manifest_r  <- reactiveFileReader(2000, session, file.path(DATA_DIR, "manifest.json"),
                                     function(p) if (file.exists(p)) jsonlite::read_json(p, simplifyVector = TRUE) else NULL)
 
@@ -383,6 +409,44 @@ server <- function(input, output, session) {
   output$intl_comp_plot <- renderPlotly(intl_competition_bar(intl_f(), metric = input$intl_metric))
   output$intl_outcome   <- renderPlotly(intl_outcome_bar(intl_f()))
   output$intl_calib     <- renderPlotly(intl_calibration_plot(intl_f()))
+
+  # ── Intl games (per-game model vs bookmaker) ──
+  observeEvent(intl(), {
+    comps <- sort(unique(intl()$Competition))
+    updateSelectizeInput(session, "ig_comp", choices = comps, selected = comps, server = FALSE)
+  }, ignoreNULL = TRUE)
+
+  ig_joined <- reactive({
+    perf <- intl(); req(perf)
+    if (!is.null(input$ig_comp) && length(input$ig_comp))
+      perf <- dplyr::filter(perf, Competition %in% input$ig_comp)
+    od <- intl_odds_r()
+    if (is.null(od) || !nrow(od)) return(perf)
+    ob <- od[od$Bookmaker == input$ig_book,
+             c("MatchID", "BookieNLL", "BookiePick", "BookieWinProb", "BookieDrawProb", "BookieLoseProb")]
+    dplyr::left_join(perf, ob, by = "MatchID")
+  })
+  ig_withodds <- reactive({ j <- ig_joined(); if (is.null(j) || !"BookieNLL" %in% names(j)) return(j[0, ]); j[is.finite(j$BookieNLL), ] })
+
+  output$ig_n     <- renderText({ w <- ig_withodds(); as.character(nrow(w)) })
+  output$ig_mnll  <- renderText({ w <- ig_withodds(); if (!nrow(w)) "-" else sprintf("%.3f", mean(w$NLL, na.rm = TRUE)) })
+  output$ig_bnll  <- renderText({ w <- ig_withodds(); if (!nrow(w)) "-" else sprintf("%.3f", mean(w$BookieNLL, na.rm = TRUE)) })
+  output$ig_beats <- renderText({ w <- ig_withodds(); if (!nrow(w)) "-" else sprintf("%d / %d", sum(w$NLL < w$BookieNLL, na.rm = TRUE), nrow(w)) })
+  output$ig_delta <- renderPlotly(intl_games_delta_plot(ig_withodds(), input$ig_book))
+  output$ig_table <- renderDT({
+    j <- ig_joined(); req(j)
+    has_odds <- "BookieNLL" %in% names(j)
+    tab <- j |>
+      dplyr::transmute(
+        Date = MatchDate, Competition, Home = HomeTeam, Away = AwayTeam, Actual = Outcome,
+        ModelPick = PredictedResult, ModelNLL = round(NLL, 3),
+        BookiePick = if (has_odds) BookiePick else NA_character_,
+        BookieNLL = if (has_odds) round(BookieNLL, 3) else NA_real_,
+        Delta = if (has_odds) round(NLL - BookieNLL, 3) else NA_real_)
+    datatable(tab, rownames = FALSE, filter = "top",
+              options = list(pageLength = 15, order = list(list(0, "asc"))), selection = "none") |>
+      formatStyle("Delta", color = styleInterval(0, c(PAL$good, PAL$bad)))
+  })
 
   # ── sidebar status + Status tab ──
   output$last_updated <- renderText({
