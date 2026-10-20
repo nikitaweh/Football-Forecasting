@@ -63,36 +63,23 @@ auto-refresh for the international data, rebuild manually for now.
 
 ### Automatic (recommended)
 
-A Windows scheduled task runs `refresh_data.py` every 10 minutes. It hashes
+On the VPS, `orakel-website-refresh.timer` runs `refresh_data.py` every
+10 minutes (locally: a Windows scheduled task, see below). It hashes
 the model's two source CSVs; when either changes (i.e. after a model run or
 a results update) it rebuilds `data.js`, snapshots the inputs to
 `matchdays/md<N>_*.csv`, and logs to `logs/website_refresh.log` at the repo
 root. Unchanged sources are a quiet no-op (one heartbeat log line per day).
 
-### Pushing to the live site (Hostinger)
+### Live site (oracle-stats.io on the VPS)
 
-`refresh_data.py` can also upload the freshly rebuilt `data.js` straight to
-the Hostinger web hosting over SFTP, so the automatic 10-minute refresh keeps the
-live site in sync too -- not just the local checkout.
+nginx serves `/var/www/orakel`, a copied allow-list of this folder (never
+`website/` itself, because `website/config/` may hold credential files).
+With `ORAKEL_WEB_ROOT=/var/www/orakel` set, `refresh_data.py` copies every
+rebuilt `data.js` there. Everything else (`index.html`, `logos/`, `mobile/`,
+...) is published with `ops/bin/publish_website.sh` after a layout change.
+Setup and operation: `ops/README.md`.
 
-Setup (one-time):
-
-1. Install the SFTP dependency into the same Python environment the
-   scheduled task uses: `pip install paramiko`
-2. Copy `website/config/hosting_sftp.example.json` to
-   `website/config/hosting_sftp.json` and fill in the real host/port/user/password
-   (from hPanel: Websites → Dashboard → Files → SFTP details; Hostinger's
-   SFTP port is 65002, not 22) and `remote_dir` (the site's document root,
-   e.g. `/home/<user>/domains/<domain>/public_html`).
-3. That's it -- `hosting_sftp.json` is gitignored and never gets committed.
-   If it's missing, `refresh_data.py` just skips the upload (local-only mode).
-
-Every run that rebuilds `data.js` (i.e. sources changed) now also pushes
-that one file to the server. Everything else (`index.html`, `logos/`,
-`mobile/`, ...) still needs a manual upload via the Hostinger File Manager (or the Hostinger plugin's static-site deploy)
-whenever it changes -- which is rare (new season, new team, layout tweaks).
-A failed upload is logged but never fails the run: the local `data.js` is
-always correct, only the live copy might lag until the next successful push.
+### Locally (Windows)
 
 Register the task **once, on the main checkout** (PowerShell):
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=ORAKEL website refresh (no-op unless sources changed)
+
+[Timer]
+OnCalendar=*:0/10
+Unit=orakel-job@website-refresh.service
+Persistent=false
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

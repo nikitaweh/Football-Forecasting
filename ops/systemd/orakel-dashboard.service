@@ -1,0 +1,19 @@
+# Shiny dashboard on loopback only; reach it with: ssh -L 4849:127.0.0.1:4849 orakel-admin@<vps>
+[Unit]
+Description=ORAKEL Shiny dashboard
+After=network.target
+OnFailure=orakel-notify@%n.service
+
+[Service]
+User=orakel
+Group=orakel
+WorkingDirectory=/srv/ki-projekt
+EnvironmentFile=/etc/orakel/orakel.env
+ExecStart=/usr/bin/Rscript -e "shiny::runApp('dashboard', host = '127.0.0.1', port = 4849, launch.browser = FALSE)"
+Restart=on-failure
+RestartSec=30
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

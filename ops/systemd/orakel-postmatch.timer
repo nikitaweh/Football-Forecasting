@@ -1,0 +1,11 @@
+[Unit]
+Description=ORAKEL post-match collection, results, odds, dashboard data
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Europe/Berlin
+Unit=orakel-job@postmatch.service
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

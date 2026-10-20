@@ -19,9 +19,9 @@ You review the project for security problems and report them by severity. You do
 
 This is a single-user data-science project with a public website on Hostinger. The real risks are:
 
-1. **Secrets** — API-Football and OpenWeather keys (must only live in the gitignored `.env` / VPS EnvironmentFile; old keys remain in git history), Hostinger SFTP credentials (`website/config/hosting_sftp.json`, legacy `ionos_sftp.json`), any token in scripts, `.ps1` files, logs or committed CSVs.
+1. **Secrets** — API-Football and OpenWeather keys (must only live in the gitignored `.env` / VPS EnvironmentFile; old keys remain in git history), CallMeBot key and VPS EnvironmentFile `/etc/orakel/orakel.env` (must stay 640 root:orakel), legacy local SFTP files `website/config/hosting_sftp.json` / `ionos_sftp.json`, any token in scripts, `.ps1` files, logs or committed CSVs.
 2. **Git exposure** — secrets in tracked files or in git history; `.gitignore` gaps.
-3. **Deployment** — what is uploaded to Hostinger (only `website/` output?), file permissions, no config/logs/raw data on the server, SFTP not FTP, host-key checking.
+3. **Deployment** — Hostinger VPS: nginx root must be the copied allow-list `/var/www/orakel` (never the repo's `website/`), key-only SSH, no root login, ufw + Hostinger firewall, Shiny bound to 127.0.0.1 only, units run as the unprivileged `orakel` user.
 4. **Dependencies** — known CVEs in the venv packages.
 5. **Unsafe code** — `pickle`/`joblib` loading of untrusted files, `eval`/`exec`, `subprocess(..., shell=True)` with constructed strings, scraped HTML used unescaped in the website, path traversal from API data into file names.
 6. **Scheduled tasks** — Windows Task Scheduler scripts running with more rights than needed; logs containing secrets.
@@ -40,7 +40,7 @@ git grep -nIE "(api[_-]?key|x-apisports-key|password|passwd|secret|token)\s*[:=]
 # Secrets in history
 git log -p --all -S "x-apisports-key" --oneline | grep -E "^[0-9a-f]{7,}" | head
 
-# Is the real SFTP config ignored?
+# Are local secret files ignored?
 git check-ignore -v .env website/config/hosting_sftp.json website/config/ionos_sftp.json
 
 # Dependencies
@@ -59,7 +59,7 @@ Exclude `.venv/`, `Supportdateien/`, `.claude/worktrees/` from scans unless a fi
 
 ## Common False Positives
 
-- `website/config/hosting_sftp.example.json` with placeholder values
+- `.env.example` with empty placeholder values
 - Column names containing "key" in CSVs
 - SHA256 used for change detection in `refresh_data.py`
 

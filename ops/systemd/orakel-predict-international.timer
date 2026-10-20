@@ -1,0 +1,11 @@
+[Unit]
+Description=ORAKEL international prediction check (hourly; kickoff guard decides)
+
+[Timer]
+OnCalendar=*-*-* 06..21:30:00 Europe/Berlin
+Unit=orakel-job@predict-international.service
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

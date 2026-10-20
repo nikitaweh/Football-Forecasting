@@ -1,0 +1,11 @@
+[Unit]
+Description=ORAKEL daily pre-match collection (fixtures, injuries, weather)
+
+[Timer]
+OnCalendar=*-*-* 05:15:00 Europe/Berlin
+Unit=orakel-job@collect-daily.service
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

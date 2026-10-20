@@ -1,0 +1,10 @@
+# Started by OnFailure= of a failed unit; %i is that unit's name.
+[Unit]
+Description=WhatsApp alert for failed %i
+
+[Service]
+Type=oneshot
+User=orakel
+Group=orakel
+EnvironmentFile=/etc/orakel/orakel.env
+ExecStart=/srv/ki-projekt/ops/bin/notify_whatsapp.sh %i

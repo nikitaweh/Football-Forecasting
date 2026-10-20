@@ -1,0 +1,22 @@
+# One template for every pipeline job: orakel-job@<job>.service runs ops/bin/orakel_job.sh <job>.
+[Unit]
+Description=ORAKEL job %i
+After=network-online.target
+Wants=network-online.target
+OnFailure=orakel-notify@%n.service
+
+[Service]
+Type=oneshot
+User=orakel
+Group=orakel
+WorkingDirectory=/srv/ki-projekt
+EnvironmentFile=/etc/orakel/orakel.env
+ExecStart=/srv/ki-projekt/ops/bin/orakel_job.sh %i
+TimeoutStartSec=6h
+Nice=10
+# Keep headroom for nginx, sshd and the dashboard on the 8 GB VPS.
+MemoryHigh=6G
+MemoryMax=7G
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true

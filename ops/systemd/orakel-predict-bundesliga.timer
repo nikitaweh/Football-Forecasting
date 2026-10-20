@@ -1,0 +1,11 @@
+[Unit]
+Description=ORAKEL Bundesliga prediction check (hourly; kickoff guard decides)
+
+[Timer]
+OnCalendar=*-*-* 06..21:00:00 Europe/Berlin
+Unit=orakel-job@predict-bundesliga.service
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

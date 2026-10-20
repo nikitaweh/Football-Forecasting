@@ -17,7 +17,5 @@ tzdata==2024.2
 python-dateutil==2.9.0.post0
 pytz==2024.2
 
-# Optional: bwin historical odds (read_excel) and the SFTP push in website/refresh_data.py
-# (version unpinned: not installed in the local reference venv)
+# bwin historical odds (read_excel); unpinned: not installed in the local reference venv
 openpyxl
-paramiko
