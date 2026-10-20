@@ -2,14 +2,14 @@
 window.ORAKEL_DATA = {
   "meta": {
     "league": "Bundesliga",
-    "season": "2025/26",
-    "matchday": 34,
-    "matchdayLabel": "Matchday 34",
-    "matchdayDate": "2026-05-16",
+    "season": "2026/27",
+    "matchday": 6,
+    "matchdayLabel": "Matchday 6",
+    "matchdayDate": "2026-10-16",
     "model": "Gradient-boosted match-stat simulation",
-    "configuration": "Balanced (Run 181)",
+    "configuration": "Balanced, Conservative, Aggressive (Run 12)",
     "signalsPerMatch": 34,
-    "generated": "2026-06-12"
+    "generated": "2026-10-20"
   },
   "teams": {
     "Bayern München": {
@@ -123,229 +123,193 @@ window.ORAKEL_DATA = {
   },
   "matches": [
     {
-      "id": 1388606,
-      "date": "2026-05-16",
+      "id": 1575185,
+      "date": "2026-10-17",
       "home": "Bayern München",
-      "away": "1. FC Köln",
+      "away": "RB Leipzig",
       "prediction": {
         "outcome": "HomeWin",
-        "homeWinProb": 0.8401153910739758,
-        "drawProb": 0.09945681938008655,
-        "awayWinProb": 0.06042778954593758,
-        "confidence": 0.8401153910739758,
+        "homeWinProb": 0.821803946423725,
+        "drawProb": 0.1095793251827275,
+        "awayWinProb": 0.06861672839354749,
+        "confidence": 0.821803946423725,
         "homeGoals": 3,
         "awayGoals": 1,
         "scoreline": "3-1",
-        "xgHome": 3.165178974626357,
-        "xgAway": 0.8765694306140577,
-        "goalDiff": 2.2886095440122993,
-        "label": "Balanced"
+        "xgHome": 2.978187054561805,
+        "xgAway": 0.8427132669816033,
+        "goalDiff": 2.1354737875802012,
+        "label": "Balanced, Conservative, Aggressive"
       },
-      "result": {
-        "homeGoals": 5,
-        "awayGoals": 1,
-        "outcome": "HomeWin"
-      }
+      "result": null
     },
     {
-      "id": 1388605,
-      "date": "2026-05-16",
+      "id": 1575186,
+      "date": "2026-10-18",
       "home": "Bayer Leverkusen",
-      "away": "Hamburger SV",
+      "away": "SC Freiburg",
       "prediction": {
         "outcome": "HomeWin",
-        "homeWinProb": 0.7283168056886422,
-        "drawProb": 0.1494692494799586,
-        "awayWinProb": 0.12221394483139914,
-        "confidence": 0.7283168056886422,
-        "homeGoals": 2,
+        "homeWinProb": 0.7819849145413971,
+        "drawProb": 0.12835081895482242,
+        "awayWinProb": 0.08966426650378051,
+        "confidence": 0.7819849145413971,
+        "homeGoals": 3,
         "awayGoals": 1,
-        "scoreline": "2-1",
-        "xgHome": 2.4525851177036277,
-        "xgAway": 0.8600563046006902,
-        "goalDiff": 1.5925288131029376,
-        "label": "Balanced"
+        "scoreline": "3-1",
+        "xgHome": 2.6461825109568564,
+        "xgAway": 0.7649107366315682,
+        "goalDiff": 1.8812717743252882,
+        "label": "Balanced, Conservative, Aggressive"
       },
-      "result": {
-        "homeGoals": 1,
-        "awayGoals": 1,
-        "outcome": "Draw"
-      }
+      "result": null
     },
     {
-      "id": 1388608,
-      "date": "2026-05-16",
+      "id": 1575187,
+      "date": "2026-10-16",
       "home": "Eintracht Frankfurt",
-      "away": "VfB Stuttgart",
+      "away": "1. FC Köln",
       "prediction": {
         "outcome": "HomeWin",
-        "homeWinProb": 0.4733193508092147,
-        "drawProb": 0.21437723168865785,
-        "awayWinProb": 0.3123034175021274,
-        "confidence": 0.4733193508092147,
+        "homeWinProb": 0.6340266994129842,
+        "drawProb": 0.183623983997232,
+        "awayWinProb": 0.18234931658978376,
+        "confidence": 0.6340266994129842,
         "homeGoals": 2,
         "awayGoals": 1,
         "scoreline": "2-1",
-        "xgHome": 1.8769346274953613,
-        "xgAway": 1.4972531519383199,
-        "goalDiff": 0.37968147555704146,
-        "label": "Balanced"
+        "xgHome": 2.4408949955197,
+        "xgAway": 1.333463558191173,
+        "goalDiff": 1.1074314373285272,
+        "label": "Balanced, Conservative, Aggressive"
       },
-      "result": {
-        "homeGoals": 2,
-        "awayGoals": 2,
-        "outcome": "Draw"
-      }
+      "result": null
     },
     {
-      "id": 1388607,
-      "date": "2026-05-16",
+      "id": 1575191,
+      "date": "2026-10-17",
+      "home": "Werder Bremen",
+      "away": "SC Paderborn 07",
+      "prediction": {
+        "outcome": "HomeWin",
+        "homeWinProb": 0.6149506240955762,
+        "drawProb": 0.1890938288386973,
+        "awayWinProb": 0.1959555470657265,
+        "confidence": 0.6149506240955762,
+        "homeGoals": 2,
+        "awayGoals": 1,
+        "scoreline": "2-1",
+        "xgHome": 1.9122489809880283,
+        "xgAway": 0.8940010190119716,
+        "goalDiff": 1.0182479619760567,
+        "label": "Balanced, Conservative, Aggressive"
+      },
+      "result": null
+    },
+    {
+      "id": 1575188,
+      "date": "2026-10-17",
+      "home": "Union Berlin",
+      "away": "Borussia Dortmund",
+      "prediction": {
+        "outcome": "AwayWin",
+        "homeWinProb": 0.2003238842804509,
+        "drawProb": 0.19073744596742703,
+        "awayWinProb": 0.6089386697521221,
+        "confidence": 0.6089386697521221,
+        "homeGoals": 1,
+        "awayGoals": 2,
+        "scoreline": "1-2",
+        "xgHome": 1.2430465047355437,
+        "xgAway": 2.2334677022334173,
+        "goalDiff": -0.9904211974978736,
+        "label": "Balanced, Conservative, Aggressive"
+      },
+      "result": null
+    },
+    {
+      "id": 1575193,
+      "date": "2026-10-17",
+      "home": "SV Elversberg",
+      "away": "FC Augsburg",
+      "prediction": {
+        "outcome": "HomeWin",
+        "homeWinProb": 0.5739368489645009,
+        "drawProb": 0.1995312809764495,
+        "awayWinProb": 0.22653187005904957,
+        "confidence": 0.5739368489645009,
+        "homeGoals": 2,
+        "awayGoals": 1,
+        "scoreline": "2-1",
+        "xgHome": 2.175592080329775,
+        "xgAway": 1.3450326325778965,
+        "goalDiff": 0.8305594477518783,
+        "label": "Balanced, Conservative, Aggressive"
+      },
+      "result": null
+    },
+    {
+      "id": 1575189,
+      "date": "2026-10-18",
       "home": "Borussia Mönchengladbach",
       "away": "1899 Hoffenheim",
       "prediction": {
         "outcome": "HomeWin",
-        "homeWinProb": 0.4657377625779837,
-        "drawProb": 0.21518175423646302,
-        "awayWinProb": 0.31908048318555327,
-        "confidence": 0.4657377625779837,
-        "homeGoals": 2,
-        "awayGoals": 1,
-        "scoreline": "2-1",
-        "xgHome": 1.667380472114545,
-        "xgAway": 1.321963790180537,
-        "goalDiff": 0.3454166819340081,
-        "label": "Balanced"
+        "homeWinProb": 0.4891334688162364,
+        "drawProb": 0.21511849058824656,
+        "awayWinProb": 0.295748040595517,
+        "confidence": 0.4891334688162364,
+        "homeGoals": 3,
+        "awayGoals": 2,
+        "scoreline": "3-2",
+        "xgHome": 2.2268103547339217,
+        "xgAway": 1.7751189057162389,
+        "goalDiff": 0.4516914490176829,
+        "label": "Balanced, Conservative, Aggressive"
       },
-      "result": {
-        "homeGoals": 4,
-        "awayGoals": 0,
-        "outcome": "HomeWin"
-      }
+      "result": null
     },
     {
-      "id": 1388612,
-      "date": "2026-05-16",
-      "home": "Union Berlin",
-      "away": "FC Augsburg",
-      "prediction": {
-        "outcome": "HomeWin",
-        "homeWinProb": 0.4643042123156721,
-        "drawProb": 0.21532577582481965,
-        "awayWinProb": 0.32037001185950825,
-        "confidence": 0.4643042123156721,
-        "homeGoals": 2,
-        "awayGoals": 1,
-        "scoreline": "2-1",
-        "xgHome": 1.6832374452418297,
-        "xgAway": 1.3443055961190322,
-        "goalDiff": 0.3389318491227975,
-        "label": "Balanced"
-      },
-      "result": {
-        "homeGoals": 4,
-        "awayGoals": 0,
-        "outcome": "HomeWin"
-      }
-    },
-    {
-      "id": 1388610,
-      "date": "2026-05-16",
-      "home": "1. FC Heidenheim",
+      "id": 1575192,
+      "date": "2026-10-17",
+      "home": "FC Schalke 04",
       "away": "FSV Mainz 05",
       "prediction": {
         "outcome": "HomeWin",
-        "homeWinProb": 0.46148637012890914,
-        "drawProb": 0.21560131394515836,
-        "awayWinProb": 0.3229123159259325,
-        "confidence": 0.46148637012890914,
+        "homeWinProb": 0.4274494993880986,
+        "drawProb": 0.22096360405257298,
+        "awayWinProb": 0.3515868965593284,
+        "confidence": 0.4274494993880986,
         "homeGoals": 2,
         "awayGoals": 1,
         "scoreline": "2-1",
-        "xgHome": 1.7908606814537018,
-        "xgAway": 1.4646818634331051,
-        "goalDiff": 0.3261788180205967,
-        "label": "Balanced"
+        "xgHome": 1.5889224460134446,
+        "xgAway": 1.4132135209135188,
+        "goalDiff": 0.17570892509992575,
+        "label": "Balanced, Conservative, Aggressive"
       },
-      "result": {
-        "homeGoals": 0,
-        "awayGoals": 2,
-        "outcome": "AwayWin"
-      }
+      "result": null
     },
     {
-      "id": 1388611,
-      "date": "2026-05-16",
-      "home": "FC St. Pauli",
-      "away": "VfL Wolfsburg",
+      "id": 1575190,
+      "date": "2026-10-17",
+      "home": "Hamburger SV",
+      "away": "VfB Stuttgart",
       "prediction": {
-        "outcome": "AwayWin",
-        "homeWinProb": 0.32362524881619437,
-        "drawProb": 0.2156765899267904,
-        "awayWinProb": 0.46069816125701524,
-        "confidence": 0.46069816125701524,
-        "homeGoals": 1,
+        "outcome": "HomeWin",
+        "homeWinProb": 0.40546362668374203,
+        "drawProb": 0.2218251215233265,
+        "awayWinProb": 0.37271125179293146,
+        "confidence": 0.40546362668374203,
+        "homeGoals": 3,
         "awayGoals": 2,
-        "scoreline": "1-2",
-        "xgHome": 1.2727297481888484,
-        "xgAway": 1.595339740433613,
-        "goalDiff": -0.3226099922447645,
-        "label": "Balanced"
+        "scoreline": "3-2",
+        "xgHome": 1.6588646291966282,
+        "xgAway": 1.5830982122324053,
+        "goalDiff": 0.07576641696422293,
+        "label": "Balanced, Conservative, Aggressive"
       },
-      "result": {
-        "homeGoals": 1,
-        "awayGoals": 3,
-        "outcome": "AwayWin"
-      }
-    },
-    {
-      "id": 1388613,
-      "date": "2026-05-16",
-      "home": "Werder Bremen",
-      "away": "Borussia Dortmund",
-      "prediction": {
-        "outcome": "AwayWin",
-        "homeWinProb": 0.3705904809247995,
-        "drawProb": 0.21879726655776593,
-        "awayWinProb": 0.41061225251743455,
-        "confidence": 0.41061225251743455,
-        "homeGoals": 1,
-        "awayGoals": 2,
-        "scoreline": "1-2",
-        "xgHome": 1.4693169600087794,
-        "xgAway": 1.5630856100987087,
-        "goalDiff": -0.0937686500899293,
-        "label": "Balanced"
-      },
-      "result": {
-        "homeGoals": 0,
-        "awayGoals": 2,
-        "outcome": "AwayWin"
-      }
-    },
-    {
-      "id": 1388609,
-      "date": "2026-05-16",
-      "home": "SC Freiburg",
-      "away": "RB Leipzig",
-      "prediction": {
-        "outcome": "AwayWin",
-        "homeWinProb": 0.3708381520621974,
-        "drawProb": 0.21880451136890744,
-        "awayWinProb": 0.41035733656889517,
-        "confidence": 0.41035733656889517,
-        "homeGoals": 2,
-        "awayGoals": 3,
-        "scoreline": "2-3",
-        "xgHome": 1.5127213179754808,
-        "xgAway": 1.605311468909765,
-        "goalDiff": -0.09259015093428413,
-        "label": "Balanced"
-      },
-      "result": {
-        "homeGoals": 4,
-        "awayGoals": 1,
-        "outcome": "HomeWin"
-      }
+      "result": null
     }
   ]
 };
