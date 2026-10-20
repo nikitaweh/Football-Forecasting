@@ -22,8 +22,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import analyze_backtest_results as agg
 from diagnose_draws import nll
 from compare_models_vs_bookie import variants_for_row
+import os
 
-ROOT = Path(r'C:/AI Projekt/KI-Projekt')
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[3]).as_posix()
+
+
+ROOT = Path(rf'{PROJECT_ROOT}')
 PRED = ROOT / 'Sports Api Data' / 'International' / 'Model Output' / 'competitive' / 'international_competitive_validation.csv'
 ODDS_DIR = ROOT / 'Sports Api Data' / 'Testruns' / 'BWIN Odds' / 'Datacollection'
 OUTCOMES = ['H', 'D', 'A']

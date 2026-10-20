@@ -5,16 +5,21 @@ import os
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
 
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-BASE_DIR        = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
+BASE_DIR        = rf"{PROJECT_ROOT}/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
 # Alle Profil-Dateien (Bundesliga + internationale Wettbewerbe)
 PROFILES_PATTERN = os.path.join(BASE_DIR, "players_profiles*.json")
 SEASONS_FILE    = os.path.join(BASE_DIR, "players_activity_78.json")
 TRANSFERS_FILE  = os.path.join(BASE_DIR, "transferhistory_78.json")
-OUTPUT_CSV_FILE = os.path.join(r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Filtered/Datacollection","player_information_78.csv")
+OUTPUT_CSV_FILE = os.path.join(rf"{PROJECT_ROOT}/Sports Api Data/Player Profiles/Filtered/Datacollection","player_information_78.csv")
 
 # ---------------------------
 # Funktion zur Erstellung der CSV

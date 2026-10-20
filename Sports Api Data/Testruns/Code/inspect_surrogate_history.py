@@ -24,8 +24,13 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import os
 
-TESTRUNS_PATH = Path(r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns')
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[3]).as_posix()
+
+
+TESTRUNS_PATH = Path(rf'{PROJECT_ROOT}/Sports Api Data/Testruns')
 FOLDERS = {
     'reference': TESTRUNS_PATH / 'Datacollection reference' / 'surrogate_run_history.csv',
     'future': TESTRUNS_PATH / 'Datacollection future' / 'surrogate_run_history.csv',

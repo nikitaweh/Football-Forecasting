@@ -10,16 +10,16 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 PATHS = {
-    "fixtures_unfiltered": r"Sports Api Data\International\UEFA\Unfiltered\Code\Fixtures International.py",
-    "stammdaten_filtered": r"Sports Api Data\International\UEFA\Filtered\Code\Stammdaten_international.py",
-    "injuries_unfiltered": r"Sports Api Data\International\UEFA\Unfiltered\Code\injuries_international.py",
-    "injuries_filtered": r"Sports Api Data\International\UEFA\Filtered\Code\injuries_international.py",
-    "lineups_unfiltered": r"Sports Api Data\International\UEFA\Unfiltered\Code\lineups_international.py",
-    "lineups_filtered": r"Sports Api Data\International\UEFA\Filtered\Code\lineups_international.py",
-    "matchstats_unfiltered": r"Sports Api Data\International\UEFA\Unfiltered\Code\match_statistics_international.py",
-    "matchstats_filtered": r"Sports Api Data\International\UEFA\Filtered\Code\match_statistics_international.py",
-    "playerstats_unfiltered": r"Sports Api Data\International\UEFA\Unfiltered\Code\player_statistics_international.py",
-    "playerstats_filtered": r"Sports Api Data\International\UEFA\Filtered\Code\playerstatistics_international.py",
+    "fixtures_unfiltered": r"Sports Api Data/International/UEFA/Unfiltered/Code/Fixtures International.py",
+    "stammdaten_filtered": r"Sports Api Data/International/UEFA/Filtered/Code/Stammdaten_international.py",
+    "injuries_unfiltered": r"Sports Api Data/International/UEFA/Unfiltered/Code/injuries_international.py",
+    "injuries_filtered": r"Sports Api Data/International/UEFA/Filtered/Code/injuries_international.py",
+    "lineups_unfiltered": r"Sports Api Data/International/UEFA/Unfiltered/Code/lineups_international.py",
+    "lineups_filtered": r"Sports Api Data/International/UEFA/Filtered/Code/lineups_international.py",
+    "matchstats_unfiltered": r"Sports Api Data/International/UEFA/Unfiltered/Code/match_statistics_international.py",
+    "matchstats_filtered": r"Sports Api Data/International/UEFA/Filtered/Code/match_statistics_international.py",
+    "playerstats_unfiltered": r"Sports Api Data/International/UEFA/Unfiltered/Code/player_statistics_international.py",
+    "playerstats_filtered": r"Sports Api Data/International/UEFA/Filtered/Code/playerstatistics_international.py",
 }
 
 MODULE_CACHE = {}

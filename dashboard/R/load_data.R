@@ -16,11 +16,16 @@ APP_DIR   <- getwd()
 DATA_DIR  <- file.path(APP_DIR, "data")
 REPO_ROOT <- normalizePath(file.path(APP_DIR, ".."), winslash = "/", mustWork = FALSE)
 
-# Python exporter + the interpreter that has pandas (project venv, else PATH).
+# Python exporter + the interpreter that has pandas (ORAKEL_PYTHON, e.g. the
+# VPS venv; else the Windows project venv; else python3/python on PATH).
 EXPORTER  <- file.path(REPO_ROOT, "Sports Api Data", "Testruns", "Code", "build_dashboard_data.py")
 PYTHON <- local({
+  env  <- Sys.getenv("ORAKEL_PYTHON")
   venv <- file.path(REPO_ROOT, "Supportdateien", ".venv", "Scripts", "python.exe")
-  if (file.exists(venv)) venv else unname(Sys.which("python"))
+  if (nzchar(env)) env
+  else if (file.exists(venv)) venv
+  else if (nzchar(Sys.which("python3"))) unname(Sys.which("python3"))
+  else unname(Sys.which("python"))
 })
 
 # Source inputs the exporter depends on (kept in sync with

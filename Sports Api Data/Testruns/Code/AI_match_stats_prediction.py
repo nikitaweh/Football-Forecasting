@@ -19,10 +19,15 @@ from sklearn.model_selection import KFold, train_test_split
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[3]).as_posix()
+
 
 # Pfad zum Datenordner anpassen
-DATA_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection'
-TESTRUNS_PATH = r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns'
+DATA_PATH = rf'{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection'
+TESTRUNS_PATH = rf'{PROJECT_ROOT}/Sports Api Data/Testruns'
 FUTURE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection future')
 REFERENCE_OUTPUT_PATH = os.path.join(TESTRUNS_PATH, 'Datacollection reference')
 WEATHER_HIST_PATH = os.path.join(DATA_PATH, 'historical_weather_data_78.csv')
@@ -32,7 +37,7 @@ PLAYER_STATS_PATH = os.path.join(DATA_PATH, 'player_statistics_per_fixture_leagu
 # International data is split into FIFA and UEFA confederation branches. The player
 # workload builder concatenates both branches' competitive Filtered CSVs (friendlies
 # live in a separate Friendlies/ subtree and are excluded from the workload anyway).
-INTERNATIONAL_BASE = r'C:/AI Projekt/KI-Projekt/Sports Api Data/International'
+INTERNATIONAL_BASE = rf'{PROJECT_ROOT}/Sports Api Data/International'
 INTERNATIONAL_BRANCHES = ('FIFA', 'UEFA')
 INTERNATIONAL_FIXTURES_PATH = [
     os.path.join(INTERNATIONAL_BASE, b, 'Filtered', 'Datacollection', 'Stammdaten_international.csv')

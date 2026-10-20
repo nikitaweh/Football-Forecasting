@@ -5,14 +5,35 @@ import requests
 from requests.exceptions import RequestException, HTTPError, ConnectionError
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
+
+def _secret(name):
+    """API keys come from the environment (systemd EnvironmentFile on the VPS)
+    or, failing that, from the gitignored .env at the repo root."""
+    env_file = os.path.join(PROJECT_ROOT, ".env")
+    if name not in os.environ and os.path.exists(env_file):
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip('"'))
+    if not os.environ.get(name):
+        raise RuntimeError(f"{name} is not set (environment or {env_file})")
+    return os.environ[name]
+
+
 
 # ---------------------------
 # Konfiguration
 # ---------------------------
 API_HOST    = "https://v3.football.api-sports.io"
-API_KEY     = "5fa2372f2bfcbedb8ef7b85c86f0a27a"
+API_KEY     = _secret("API_FOOTBALL_KEY")
 # Basis-Ausgabepfad; für jede Liga wird eine eigene Datei erstellt
-OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles"
+OUTPUT_JSON = rf"{PROJECT_ROOT}/Sports Api Data/Player Profiles/Unfiltered/Datacollection/players_profiles"
 # Liste der Liga-IDs, die abgefragt werden sollen
 # 78 = Bundesliga, 1 = World Cup, 4 = Euro Championship,
 # 5 = UEFA Nations League, 10 = Friendlies (international)

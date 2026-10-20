@@ -4,12 +4,17 @@ import os
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
 
 # ---------------------------
 # Dateipfade anpassen
 # ---------------------------
-INPUT_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga Teams.json"
-OUTPUT_FILE_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Teams_78.csv"
+INPUT_FILE_PATH = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga Teams.json"
+OUTPUT_FILE_PATH = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/Teams_78.csv"
 
 # ---------------------------
 # Funktion: JSON zu CSV konvertieren

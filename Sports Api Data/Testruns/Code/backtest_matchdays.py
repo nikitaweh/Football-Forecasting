@@ -29,10 +29,14 @@ from pathlib import Path
 
 import pandas as pd
 
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[3]).as_posix()
+
+
 SEASON = 2025
 
-TESTRUNS_PATH = Path(r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns')
-DATA_PATH = Path(r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection')
+TESTRUNS_PATH = Path(rf'{PROJECT_ROOT}/Sports Api Data/Testruns')
+DATA_PATH = Path(rf'{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection')
 SCRIPT_PATH = TESTRUNS_PATH / 'Code' / 'AI_match_stats_prediction.py'
 REFERENCE_DIR = TESTRUNS_PATH / 'Datacollection reference'
 BACKTEST_DIR = TESTRUNS_PATH / 'Datacollection backtest'

@@ -4,13 +4,18 @@ import os
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
 
 # ----------------------------
 # Pfade zu den Input- und Output-Dateien
 # ----------------------------
-fixtures_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/fixtures_league_78.json"
-stats_file    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/match_statistics_league_78.json"
-output_csv    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/match_statistics_filtered_78.csv"
+fixtures_file = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Unfiltered/Datacollection/fixtures_league_78.json"
+stats_file    = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Unfiltered/Datacollection/match_statistics_league_78.json"
+output_csv    = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/match_statistics_filtered_78.csv"
 
 # ----------------------------
 # Hilfsfunktionen

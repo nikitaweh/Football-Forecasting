@@ -19,7 +19,7 @@ You review the project for security problems and report them by severity. You do
 
 This is a single-user data-science project with a public website on Hostinger. The real risks are:
 
-1. **Secrets** — API-Football key, Hostinger SFTP credentials (`website/config/hosting_sftp.json`, legacy `ionos_sftp.json`), any token in scripts, `.ps1` files, logs or committed CSVs.
+1. **Secrets** — API-Football and OpenWeather keys (must only live in the gitignored `.env` / VPS EnvironmentFile; old keys remain in git history), Hostinger SFTP credentials (`website/config/hosting_sftp.json`, legacy `ionos_sftp.json`), any token in scripts, `.ps1` files, logs or committed CSVs.
 2. **Git exposure** — secrets in tracked files or in git history; `.gitignore` gaps.
 3. **Deployment** — what is uploaded to Hostinger (only `website/` output?), file permissions, no config/logs/raw data on the server, SFTP not FTP, host-key checking.
 4. **Dependencies** — known CVEs in the venv packages.
@@ -41,7 +41,7 @@ git grep -nIE "(api[_-]?key|x-apisports-key|password|passwd|secret|token)\s*[:=]
 git log -p --all -S "x-apisports-key" --oneline | grep -E "^[0-9a-f]{7,}" | head
 
 # Is the real SFTP config ignored?
-git check-ignore -v website/config/hosting_sftp.json website/config/ionos_sftp.json
+git check-ignore -v .env website/config/hosting_sftp.json website/config/ionos_sftp.json
 
 # Dependencies
 "C:\AI Projekt\.venv\Scripts\python.exe" -m pip_audit   # if installed; otherwise say so, do not install

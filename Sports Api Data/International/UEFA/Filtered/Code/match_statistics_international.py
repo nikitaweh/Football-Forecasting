@@ -4,13 +4,18 @@ import os
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[5]).as_posix()
+
 
 # ----------------------------
 # Pfade zu den Input- und Output-Dateien
 # ----------------------------
-fixtures_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/UEFA/Unfiltered/Datacollection/fixtures_international.json"
-stats_file    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/UEFA/Unfiltered/Datacollection/match_statistics_international.json"
-output_csv    = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/UEFA/Filtered/Datacollection/match_statistics_filtered_international.csv"
+fixtures_file = rf"{PROJECT_ROOT}/Sports Api Data/International/UEFA/Unfiltered/Datacollection/fixtures_international.json"
+stats_file    = rf"{PROJECT_ROOT}/Sports Api Data/International/UEFA/Unfiltered/Datacollection/match_statistics_international.json"
+output_csv    = rf"{PROJECT_ROOT}/Sports Api Data/International/UEFA/Filtered/Datacollection/match_statistics_filtered_international.csv"
 
 # Beendete Spielstatus bei internationalen Spielen (inkl. Verlaengerung/Elfmeterschiessen)
 FINISHED_STATUSES = {"FT", "AET", "PEN"}

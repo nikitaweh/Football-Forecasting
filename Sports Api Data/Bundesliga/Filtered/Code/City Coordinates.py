@@ -7,16 +7,37 @@ from pathlib import Path
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import os
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
+
+def _secret(name):
+    """API keys come from the environment (systemd EnvironmentFile on the VPS)
+    or, failing that, from the gitignored .env at the repo root."""
+    env_file = os.path.join(PROJECT_ROOT, ".env")
+    if name not in os.environ and os.path.exists(env_file):
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip('"'))
+    if not os.environ.get(name):
+        raise RuntimeError(f"{name} is not set (environment or {env_file})")
+    return os.environ[name]
+
+
 
 # OpenWeatherMap API key
-API_KEY = "3820fa176fb1bbea6f35ea43ae9f2d1c"
+API_KEY = _secret("OPENWEATHER_GEO_KEY")
 
 # Input/output paths
 INPUT_JSON_FILE = Path(
-    "C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga Teams.json"
+    f"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Unfiltered/Datacollection/Bundesliga Teams.json"
 )
 OUTPUT_CSV_FILE = Path(
-    "C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
+    f"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
 )
 
 # Team-specific city overrides (spelling/disambiguation)

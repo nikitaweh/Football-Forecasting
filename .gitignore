@@ -26,3 +26,6 @@ website/config/ionos_sftp.json
 
 # Pre-run data backups
 *.bak
+
+# Local API keys (see .env.example)
+.env

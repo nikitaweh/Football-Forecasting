@@ -6,17 +6,38 @@ import http.client
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
+
+def _secret(name):
+    """API keys come from the environment (systemd EnvironmentFile on the VPS)
+    or, failing that, from the gitignored .env at the repo root."""
+    env_file = os.path.join(PROJECT_ROOT, ".env")
+    if name not in os.environ and os.path.exists(env_file):
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip('"'))
+    if not os.environ.get(name):
+        raise RuntimeError(f"{name} is not set (environment or {env_file})")
+    return os.environ[name]
+
+
 
 # ---------------------------
 # Konfiguration
 # ---------------------------
 # Alle Profil-Dateien (Bundesliga + internationale Wettbewerbe) einlesen
-INPUT_DIR     = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
+INPUT_DIR     = rf"{PROJECT_ROOT}/Sports Api Data/Player Profiles/Unfiltered/Datacollection"
 INPUT_PATTERN = os.path.join(INPUT_DIR, "players_profiles*.json")
-OUTPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Player Profiles/Unfiltered/Datacollection/transferhistory_78.json"
+OUTPUT_JSON = rf"{PROJECT_ROOT}/Sports Api Data/Player Profiles/Unfiltered/Datacollection/transferhistory_78.json"
 
 API_HOST    = "v3.football.api-sports.io"
-API_KEY     = "5fa2372f2bfcbedb8ef7b85c86f0a27a"
+API_KEY     = _secret("API_FOOTBALL_KEY")
 HEADERS     = {
     'x-rapidapi-host': API_HOST,
     'x-rapidapi-key':  API_KEY

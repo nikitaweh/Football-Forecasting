@@ -8,18 +8,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 PATHS = {
-    "fixtures_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\Fixtures Bundesliga.py",
-    "stammdaten_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\Stammdaten_78.py",
-    "injuries_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\injuries_78.py",
-    "injuries_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\injuries_78.py",
-    "lineups_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\lineups_78.py",
-    "lineups_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\line ups_78.py",
-    "matchstats_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\match_statistics._78.py",
-    "matchstats_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\match statistics.py",
-    "playerstats_unfiltered": r"Sports Api Data\Bundesliga\Unfiltered\Code\player individuel statistic_78.py",
-    "playerstats_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\playerstatistics.py",
-    "weather_future_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\future_weather_hourly_78.py",
-    "weather_historic_filtered": r"Sports Api Data\Bundesliga\Filtered\Code\historic_weather_data_78.py",
+    "fixtures_unfiltered": r"Sports Api Data/Bundesliga/Unfiltered/Code/Fixtures Bundesliga.py",
+    "stammdaten_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/Stammdaten_78.py",
+    "injuries_unfiltered": r"Sports Api Data/Bundesliga/Unfiltered/Code/injuries_78.py",
+    "injuries_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/injuries_78.py",
+    "lineups_unfiltered": r"Sports Api Data/Bundesliga/Unfiltered/Code/lineups_78.py",
+    "lineups_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/line ups_78.py",
+    "matchstats_unfiltered": r"Sports Api Data/Bundesliga/Unfiltered/Code/match_statistics._78.py",
+    "matchstats_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/match statistics.py",
+    "playerstats_unfiltered": r"Sports Api Data/Bundesliga/Unfiltered/Code/player individuel statistic_78.py",
+    "playerstats_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/playerstatistics.py",
+    "weather_future_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/future_weather_hourly_78.py",
+    "weather_historic_filtered": r"Sports Api Data/Bundesliga/Filtered/Code/historic_weather_data_78.py",
 }
 
 MODULE_CACHE = {}

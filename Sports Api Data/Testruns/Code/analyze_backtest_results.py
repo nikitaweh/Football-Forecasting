@@ -22,11 +22,16 @@ import math
 from pathlib import Path
 
 import pandas as pd
+import os
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[3]).as_posix()
+
 
 SEASON = 2025
 
-TESTRUNS_PATH = Path(r'C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns')
-DATA_PATH = Path(r'C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection')
+TESTRUNS_PATH = Path(rf'{PROJECT_ROOT}/Sports Api Data/Testruns')
+DATA_PATH = Path(rf'{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection')
 BACKTEST_DIR = TESTRUNS_PATH / 'Datacollection backtest'
 STAMMDATEN_PATH = DATA_PATH / 'Stammdaten_78.csv'
 STATS_PATH = DATA_PATH / 'match_statistics_filtered_78.csv'

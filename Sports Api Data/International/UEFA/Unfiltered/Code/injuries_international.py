@@ -10,12 +10,33 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[5]).as_posix()
+
+
+def _secret(name):
+    """API keys come from the environment (systemd EnvironmentFile on the VPS)
+    or, failing that, from the gitignored .env at the repo root."""
+    env_file = os.path.join(PROJECT_ROOT, ".env")
+    if name not in os.environ and os.path.exists(env_file):
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip('"'))
+    if not os.environ.get(name):
+        raise RuntimeError(f"{name} is not set (environment or {env_file})")
+    return os.environ[name]
+
+
 
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-INPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/UEFA/Unfiltered/Datacollection/fixtures_international.json"
-OUTPUT_FILE = r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/UEFA/Unfiltered/Datacollection/injuries_international.json"
+INPUT_FILE = rf"{PROJECT_ROOT}/Sports Api Data/International/UEFA/Unfiltered/Datacollection/fixtures_international.json"
+OUTPUT_FILE = rf"{PROJECT_ROOT}/Sports Api Data/International/UEFA/Unfiltered/Datacollection/injuries_international.json"
 
 # ---------------------------
 # API-Konfiguration
@@ -24,7 +45,7 @@ API_HOST = "v3.football.api-sports.io"
 API_URL = f"https://{API_HOST}/injuries"
 HEADERS = {
     "x-rapidapi-host": API_HOST,
-    "x-rapidapi-key": "5fa2372f2bfcbedb8ef7b85c86f0a27a",
+    "x-rapidapi-key": _secret("API_FOOTBALL_KEY"),
 }
 REQUEST_CONNECT_TIMEOUT = 4
 REQUEST_READ_TIMEOUT = 12

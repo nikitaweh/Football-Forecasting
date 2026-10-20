@@ -6,13 +6,34 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
+
+def _secret(name):
+    """API keys come from the environment (systemd EnvironmentFile on the VPS)
+    or, failing that, from the gitignored .env at the repo root."""
+    env_file = os.path.join(PROJECT_ROOT, ".env")
+    if name not in os.environ and os.path.exists(env_file):
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip('"'))
+    if not os.environ.get(name):
+        raise RuntimeError(f"{name} is not set (environment or {env_file})")
+    return os.environ[name]
+
+
 
 # ---------------------------
 # Pfade zu den Eingabe- und Ausgabedateien
 # ---------------------------
-stammdaten_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
-city_coordinates_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
-output_csv_file = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/future_weather_data_78.csv"
+stammdaten_file = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
+city_coordinates_file = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/city_coordinates_78.csv"
+output_csv_file = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/future_weather_data_78.csv"
 
 OUTPUT_COLUMNS = [
     "MatchID",
@@ -32,7 +53,7 @@ OUTPUT_COLUMNS = [
 # ---------------------------
 # OpenWeather API Key und Forecast-Endpoint
 # ---------------------------
-API_KEY = "abcc68d734dd721e64e567bb8c6c4bb8"
+API_KEY = _secret("OPENWEATHER_FORECAST_KEY")
 HOURLY_FORECAST_URL = "https://pro.openweathermap.org/data/2.5/forecast/hourly"
 REQUEST_CONNECT_TIMEOUT = 4
 REQUEST_READ_TIMEOUT = 8

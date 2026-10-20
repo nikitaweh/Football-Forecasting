@@ -4,12 +4,17 @@ import os
 from datetime import datetime
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
+
 
 # ---------------------------
 # Pfade anpassen
 # ---------------------------
-INPUT_JSON = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Unfiltered/Datacollection/injuries_league_78.json"
-OUTPUT_CSV = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/injuries_league_78.csv"
+INPUT_JSON = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Unfiltered/Datacollection/injuries_league_78.json"
+OUTPUT_CSV = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/injuries_league_78.csv"
 NO_DATA_MARKER = "NaN"
 
 # ---------------------------

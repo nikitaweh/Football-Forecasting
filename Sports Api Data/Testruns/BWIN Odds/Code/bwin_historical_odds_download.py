@@ -29,13 +29,18 @@ from io import BytesIO, StringIO
 
 import pandas as pd
 import requests
+from pathlib import Path
+
+# Repo root: KI_PROJECT_ROOT if set (VPS), else derived from this file's location.
+PROJECT_ROOT = Path(os.environ.get("KI_PROJECT_ROOT") or Path(__file__).resolve().parents[4]).as_posix()
 
 
-OUTPUT_DIR = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Testruns/BWIN Odds/Datacollection"
+
+OUTPUT_DIR = rf"{PROJECT_ROOT}/Sports Api Data/Testruns/BWIN Odds/Datacollection"
 BASE_URL = "https://www.football-data.co.uk/mmz4281/{season_code}/D1.csv"
 
-STAMMDATEN_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
-TEAMS_PATH = r"C:/AI Projekt/KI-Projekt/Sports Api Data/Bundesliga/Filtered/Datacollection/Teams_78.csv"
+STAMMDATEN_PATH = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/Stammdaten_78.csv"
+TEAMS_PATH = rf"{PROJECT_ROOT}/Sports Api Data/Bundesliga/Filtered/Datacollection/Teams_78.csv"
 
 # Map a human-readable season label to football-data.co.uk's season code
 # and to the api-football season integer used in Stammdaten_78.csv
@@ -78,7 +83,7 @@ FD_TO_API_TEAM_ID = {
 # ---------------------------------------------------------------------------
 # World Cup fixtures live in the FIFA confederation branch after the FIFA/UEFA split.
 INTL_STAMMDATEN_PATH = (
-    r"C:/AI Projekt/KI-Projekt/Sports Api Data/International/FIFA/"
+    rf"{PROJECT_ROOT}/Sports Api Data/International/FIFA/"
     r"Filtered/Datacollection/Stammdaten_international.csv"
 )
 

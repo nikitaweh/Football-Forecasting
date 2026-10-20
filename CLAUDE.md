@@ -78,7 +78,8 @@ BART: Chipman, George & McCulloch (2010); Linero & Yang (2018, smoothness/sparsi
 
 ## Conventions
 
-- Paths in the code are absolute (`C:/AI Projekt/KI-Projekt/...`).
+- Paths are built from `PROJECT_ROOT` (env `KI_PROJECT_ROOT`, else derived from the file's location; locally `C:/AI Projekt/KI-Projekt`). Never hard-code `C:/...` paths.
+- API keys come from the environment or the gitignored repo-root `.env` via `_secret("NAME")` (see `.env.example`). Never put keys in code.
 - Configuration via module constants and environment variables (`OUTCOME_PROBABILITY_MODE`, `FUTURE_ENSEMBLE_ENABLED`, `DISABLE_PLAYER_WORKLOAD`, `BACKTEST_DATE_CUTOFF` …).
 - Surrogate history is filtered by `MatchStatsMode` and feature schema; do not mix histories from different schemas.
 - Before changing the main pipeline: check leakage paths (pre-match only, OOF stats, reference matches excluded from training).
