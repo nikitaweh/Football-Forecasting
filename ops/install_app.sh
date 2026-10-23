@@ -39,7 +39,14 @@ systemctl enable --now orakel-dashboard.service
 
 # website + nginx
 sudo -u "$APP" ORAKEL_WEB_ROOT=/var/www/orakel "$ROOT/ops/bin/publish_website.sh"
-install -m 644 "$ROOT/ops/nginx/oracle-stats.io.conf" /etc/nginx/sites-available/oracle-stats.io
+# Once certbot has added the TLS block, the live file is the source of truth: overwriting it
+# with the repo version would silently drop HTTPS. Apply repo changes by hand in that case.
+SITE=/etc/nginx/sites-available/oracle-stats.io
+if grep -q "managed by Certbot" "$SITE" 2>/dev/null; then
+  echo "nginx site is certbot-managed -- not overwritten (diff it against ops/nginx/oracle-stats.io.conf)"
+else
+  install -m 644 "$ROOT/ops/nginx/oracle-stats.io.conf" "$SITE"
+fi
 ln -sf /etc/nginx/sites-available/oracle-stats.io /etc/nginx/sites-enabled/oracle-stats.io
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
