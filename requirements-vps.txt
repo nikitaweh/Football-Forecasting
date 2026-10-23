@@ -1,11 +1,15 @@
-# Python 3.11 (local reference venv: 3.11.9). Pinned to the local versions so
-# VPS runs stay comparable with local backtests (see the Phase 4 reproducibility check).
+# Python 3.11. Pinned to the local runtime venv Supportdateien/.venv (3.11.9; used by
+# start_bundesliga_schedulers.ps1 and the dashboard) so VPS runs stay comparable with local
+# backtests (see the Phase 4 reproducibility check).
 numpy==2.1.2
 pandas==2.2.3
 scikit-learn==1.6.1
 scipy==1.15.2
 joblib==1.4.2
-bartpy @ git+https://github.com/JakeColtman/bartpy.git@09e409e91dd1b9d44784c788c2d731dafb181eb0
+tqdm==4.67.3
+# bartpy is NOT listed here: its metadata requires the dead 'sklearn' PyPI package, so
+# install_app.sh installs it separately with --no-deps (commit 09e409e9). At runtime it only
+# needs numpy, pandas, scipy, scikit-learn, joblib and tqdm (all pinned here).
 
 # Data collection
 requests==2.32.3

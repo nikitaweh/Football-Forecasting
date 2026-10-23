@@ -27,7 +27,9 @@ sudo -u "$APP" -H bash -c '
   uv python install 3.11
   [ -x .venv/bin/python ] || uv venv --python 3.11 .venv
   uv pip install --python .venv/bin/python -r requirements-vps.txt
-  .venv/bin/python -c "import bartpy, sklearn, numpy, pandas; print(\"python ok:\", sklearn.__version__, numpy.__version__, pandas.__version__)"
+  # bartpy without its declared deps (they include the dead "sklearn" package)
+  uv pip install --python .venv/bin/python --no-deps "bartpy @ git+https://github.com/JakeColtman/bartpy.git@09e409e91dd1b9d44784c788c2d731dafb181eb0"
+  .venv/bin/python -c "import bartpy.sklearnmodel, sklearn, numpy, pandas; print(\"python ok:\", sklearn.__version__, numpy.__version__, pandas.__version__)"
 '
 
 # systemd units (copied, so a git pull never changes a running unit unnoticed)
