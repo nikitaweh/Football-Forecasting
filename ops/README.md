@@ -39,16 +39,18 @@ Placeholders: `VPS=187.126.5.8`. Commands marked *(local)* run in Git Bash on Wi
 4. In a **second** terminal check `ssh orakel-admin@$VPS`, then `sudo bash bootstrap_vps.sh --harden-ssh`.
 
 ### 2. Code, data, secrets (Phase 3)
-1. Code: `sudo -u orakel git clone --branch developement https://github.com/nikitaweh/Main-Project.git /srv/ki-projekt`
-   (private repo: use a read-only deploy key). Without git-lfs on the VPS, data files arrive as LFS pointers;
-   step 2 replaces them.
-2. Data *(local, from the repo root)*:
-   `tar -czf - "Sports Api Data" website/matchdays dashboard/data | ssh orakel-admin@$VPS "sudo tar -xzf - -C /srv/ki-projekt"`
-   Then compare checksums of the key CSVs on both sides (`sha256sum` / `certutil -hashfile`).
-3. Secrets: fill a copy of `.env.example` locally (API keys, the VPS-only block, CallMeBot) and
-   `scp` it to `/etc/orakel/orakel.env` (it never goes through git or chat).
-   CallMeBot: activate your number once as described on callmebot.com to get the API key.
-4. `sudo bash /srv/ki-projekt/ops/install_app.sh`
+1. Data *(local, from the repo root)*: upload an archive without code files to the admin home:
+   `tar --exclude='*.py' --exclude='__pycache__' --exclude='*.bak' -czf - "Sports Api Data" website/matchdays dashboard/data | ssh orakel-admin@$VPS "cat > orakel-data.tgz"`
+   and `scp ops/phase3_code_data.sh website/config/leagues/bundesliga.json orakel-admin@$VPS:`
+   (`bundesliga.json` is the only LFS file outside the data folders).
+2. Secrets: a filled copy of `.env.example` (API keys + VPS block) as `orakel.env` in the admin home,
+   via `scp`; it never goes through git or chat. CallMeBot: activate your number once as described on
+   callmebot.com, then add `CALLMEBOT_PHONE`/`CALLMEBOT_APIKEY`.
+3. `ssh -t orakel-admin@$VPS "sudo bash phase3_code_data.sh orakel-data.tgz bundesliga.json && sudo install -m 640 -o root -g orakel orakel.env /etc/orakel/orakel.env && rm orakel.env"`
+   It creates a GitHub deploy key for `orakel`, waits until you add it (repo Settings -> Deploy keys,
+   read-only), clones `developement` without LFS and unpacks the data over the LFS pointers.
+4. Compare checksums of the key CSVs on both sides (`sha256sum`).
+5. `sudo bash /srv/ki-projekt/ops/install_app.sh`
 
 ### 3. Website and TLS (Phase 6)
 1. DNS: A record `oracle-stats.io` (and `www`) → `187.126.5.8` (hPanel → Domains → DNS, or the plugin).
@@ -73,7 +75,9 @@ Same code tag and data snapshot on laptop and VPS, on scratch copies (`KI_PROJEC
 - Status: `systemctl list-timers 'orakel-*'`, logs: `journalctl -u 'orakel-job@*' --since today`
 - Run a job now: `sudo systemctl start orakel-job@postmatch.service`
 - Dashboard *(local)*: `ssh -L 4849:127.0.0.1:4849 orakel-admin@$VPS`, then open http://127.0.0.1:4849
-- Update code: `sudo -u orakel git -C /srv/ki-projekt pull`, then re-run `install_app.sh` if units changed.
+- Update code without touching data (data files differ from the LFS pointers in git):
+  `sudo -u orakel -H sh -c 'cd /srv/ki-projekt && git fetch && git checkout origin/developement -- . ":(exclude)*.csv" ":(exclude)*.json" ":(exclude)*.pkl"'`,
+  then re-run `install_app.sh` if units changed.
 - Data stays on the VPS (source of truth after go-live); copy it back for thesis analysis, never commit from the VPS.
 
 ## Known limits
