@@ -107,6 +107,8 @@ def run_one_matchday(matchday, fixtures, cutoff_date, max_runs, match_stats_mode
     env['BACKTEST_DATE_CUTOFF'] = cutoff_date.strftime('%Y-%m-%d')
     env['MAX_RUNS_OVERRIDE'] = str(max_runs)
     env['MATCH_STATS_MODE_OVERRIDE'] = match_stats_mode
+    # The pipeline's live default is 'future'; a backtest scores the reference matchday.
+    env['PREDICTION_MODE_OVERRIDE'] = 'reference'
     print(f'  MD{matchday:02d}: cutoff {env["BACKTEST_DATE_CUTOFF"]}, '
           f'{len(fixtures)} fixtures, MAX_RUNS={max_runs}, stats_mode={match_stats_mode}, '
           f'invoking pipeline...')

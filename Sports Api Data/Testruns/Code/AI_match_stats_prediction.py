@@ -74,6 +74,12 @@ BACKTEST_DATE_CUTOFF = pd.to_datetime(_backtest_cutoff_raw) if _backtest_cutoff_
 # "future"    = predict next unplayed matches
 # "reference" = predict matches from match_results_references.csv for debugging/evaluation
 PREDICTION_MODE = 'future'
+# Env override -- the backtest harness sets 'reference' (it writes the target
+# matchday into match_results_references.csv and copies the reference outputs),
+# so the live default can stay 'future'.
+_prediction_mode_override = os.environ.get('PREDICTION_MODE_OVERRIDE', '').strip().lower()
+if _prediction_mode_override:
+    PREDICTION_MODE = _prediction_mode_override
 REFERENCE_PREDICTION_LIMIT = None
 
 # === MATCH STATS SWITCH ===
