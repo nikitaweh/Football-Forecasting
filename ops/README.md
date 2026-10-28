@@ -80,6 +80,19 @@ Same code tag and data snapshot on laptop and VPS, on scratch copies (`KI_PROJEC
   then re-run `install_app.sh` if units changed.
 - Data stays on the VPS (source of truth after go-live); copy it back for thesis analysis, never commit from the VPS.
 
+## Laptop data pull (VPS -> laptop, one way)
+The VPS collects and predicts live (`future` mode); the laptop runs backtests and model experiments
+on a copy of that data. Model changes go laptop -> git -> VPS code update, never as copied outputs.
+- What: data files changed since the last pull, without code/docs, `Testruns/Datacollection reference`
+  and `backtest` (laptop-owned experiment folders) and the raw `*/Unfiltered/*` dumps (`-All` adds them).
+- How: key `~/.ssh/orakel_pull` *(local)* may only run `/usr/local/bin/orakel_export`
+  (`ops/bin/export_data.sh`) as `orakel`; it waits for the pipeline lock, then sends a tar.gz.
+- Setup, once: *(local)* `ssh-keygen -t ed25519 -N "" -C orakel-pull -f ~/.ssh/orakel_pull`, copy the
+  `.pub` to the admin home, `sudo bash /srv/ki-projekt/ops/install_pull_export.sh ~/orakel_pull.pub`,
+  then *(local, PowerShell)* `ops\laptop\pull_vps_data.ps1 -Since <epoch of the last data sync>`
+  and `ops\laptop\register_pull_task.ps1` (task "ORAKEL VPS Data Pull": daily 07:00 + at logon).
+- The pull skips while a backtest/pipeline runs on the laptop; log and state in `logs/vps_pull/` (gitignored).
+
 ## Known limits
 - The published Bundesliga table is still the one surrogate-picked run per matchday; frozen weights and
   the draw recalibration (roadmap 1 and 4) are not part of this setup.
