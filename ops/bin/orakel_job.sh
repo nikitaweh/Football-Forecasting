@@ -41,6 +41,15 @@ guard() {
 }
 
 bundesliga() { "$PY" "$SAD/Bundesliga/Code/bundesliga_combined_pipeline_78.py" "$@"; }
+# Bwin (football-data.co.uk) first: bookmaker_odds_download.py merges it with Bet365/Betano
+# from API-Football (2-3 requests) into the file the website shows. Odds are a display
+# benchmark, so a failure is logged and the job goes on.
+odds() {
+  "$PY" "$SAD/Testruns/BWIN Odds/Code/bwin_upcoming_odds_download.py" \
+    || log "bwin odds snapshot failed"
+  "$PY" "$SAD/Testruns/BWIN Odds/Code/bookmaker_odds_download.py" \
+    || log "bookmaker odds download failed"
+}
 international() {
   "$PY" "$SAD/International/FIFA/Code/pipeline.py" "$@"
   "$PY" "$SAD/International/UEFA/Code/pipeline.py" "$@"
@@ -51,14 +60,14 @@ case "$JOB" in
     with_lock
     bundesliga --steps fixtures injuries weather --continue-on-error
     international --steps fixtures injuries --continue-on-error
+    odds
     ;;
 
   predict-bundesliga)
     with_lock
     guard bundesliga
     bundesliga --steps fixtures injuries lineups weather --continue-on-error
-    "$PY" "$SAD/Testruns/BWIN Odds/Code/bwin_upcoming_odds_download.py" \
-      || log "odds snapshot failed -- prediction continues without a fresh benchmark"
+    odds
     # future + predicted is the only leakage-safe live combination (future + actual is blocked).
     MATCH_STATS_MODE_OVERRIDE=predicted "$PY" "$SAD/Testruns/Code/AI_match_stats_prediction.py"
     # Keep every published table: a later run must never silently replace what was live.

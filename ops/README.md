@@ -18,8 +18,8 @@ Shiny dashboard (private, SSH tunnel). Failures alert via WhatsApp (CallMeBot).
 
 | Timer | When | What |
 |---|---|---|
-| `orakel-collect-daily` | 05:15 daily | Bundesliga fixtures, injuries, weather; FIFA/UEFA fixtures, injuries |
-| `orakel-predict-bundesliga` | hourly 06–21 | Runs only if the first kickoff of the next 9 unplayed matches is 3–36 h away and they are not predicted yet: fresh pre-match data → bwin odds snapshot → `AI_match_stats_prediction.py` (`future` + `predicted`) → archive table → website |
+| `orakel-collect-daily` | 05:15 daily | Bundesliga fixtures, injuries, weather; FIFA/UEFA fixtures, injuries; bookmaker odds (Bwin, Bet365, Betano) |
+| `orakel-predict-bundesliga` | hourly 06–21 | Runs only if the first kickoff of the next 9 unplayed matches is 3–36 h away and they are not predicted yet: fresh pre-match data → bookmaker odds → `AI_match_stats_prediction.py` (`future` + `predicted`) → archive table → website |
 | `orakel-predict-international` | hourly 06:30–21:30 | Runs only if a competitive FIFA/UEFA match kicks off in 3–36 h and is not predicted yet |
 | `orakel-postmatch` | 03:30 daily | Match/player stats, lineups, `update_match_results_references.py`, historical odds, dashboard data, website |
 | `orakel-website-refresh` | every 10 min | `website/refresh_data.py` (no-op unless its sources changed) |

@@ -373,6 +373,21 @@ body {
 }
 .xg b { color: var(--text); font-variant-numeric: tabular-nums; }
 
+.odds {
+  width: 100%;
+  margin-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  border-collapse: collapse;
+  font-size: .77rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.odds th, .odds td { padding: 4px 0; text-align: right; width: 18%; }
+.odds th:first-child, .odds td:first-child { text-align: left; width: auto; }
+.odds th { padding-top: 10px; color: var(--text-faint); font-weight: 500; }
+.odds__model td { color: var(--text); border-bottom: 1px solid var(--line-soft); padding-bottom: 6px; }
+.odds td.is-best { color: var(--accent); font-weight: 700; }
+
 /* ── Method ─────────────────────────────────────────────────── */
 
 .method { display: flex; flex-direction: column; gap: 10px; }

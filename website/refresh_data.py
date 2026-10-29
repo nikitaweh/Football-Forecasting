@@ -104,7 +104,7 @@ def main():
         sources = {
             name: os.path.join(ROOT, *rel.split("/"))
             for name, rel in cfg["sources"].items()
-            if name in ("predictions", "results")
+            if name in ("predictions", "results", "odds")
         }
         hashes = {name: sha256_file(path) for name, path in sources.items()}
 

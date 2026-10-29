@@ -228,7 +228,43 @@
       "<b>" + p.xgHome.toFixed(2) + "</b> – <b>" + p.xgAway.toFixed(2) + "</b>"));
     card.appendChild(xg);
 
+    var odds = oddsTable(match);
+    if (odds) card.appendChild(odds);
+
     return card;
+  }
+
+  // ── Bookmaker odds ────────────────────────────────────────
+
+  /* 1X2 odds per bookmaker under the model's fair odds (1 / probability);
+     the best price per outcome is highlighted. */
+  function oddsTable(match) {
+    var books = match.odds || [];
+    if (!books.length) return null;
+    var p = match.prediction;
+    var keys = ["home", "draw", "away"];
+    var best = keys.map(function (k) {
+      return Math.max.apply(null, books.map(function (b) { return b[k]; }));
+    });
+    function fair(prob) { return prob > 0 ? (1 / prob).toFixed(2) : "–"; }
+
+    var table = el("table", "odds");
+    table.appendChild(el("thead", null,
+      "<tr><th>Odds</th><th>1</th><th>X</th><th>2</th></tr>"));
+    var body = el("tbody");
+    body.appendChild(el("tr", "odds__model",
+      "<td>ORAKEL fair</td><td>" + fair(p.homeWinProb) + "</td><td>" +
+      fair(p.drawProb) + "</td><td>" + fair(p.awayWinProb) + "</td>"));
+    books.forEach(function (b) {
+      var row = el("tr");
+      row.appendChild(el("td", null, b.bookmaker));
+      keys.forEach(function (k, i) {
+        row.appendChild(el("td", b[k] === best[i] ? "is-best" : null, b[k].toFixed(2)));
+      });
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    return table;
   }
 
   // ── Mount grids ───────────────────────────────────────────

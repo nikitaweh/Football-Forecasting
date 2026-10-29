@@ -143,6 +143,31 @@ def load_results(path):
     return results
 
 
+BOOKMAKER_ORDER = ["Bwin", "Bet365", "Betano", "Tipico"]
+
+
+def load_odds(path):
+    """MatchID -> [{bookmaker, home, draw, away}] from bookmaker_odds_latest.csv
+    (last pre-kickoff 1X2 odds per bookmaker). Missing file -> no odds shown."""
+    odds = {}
+    if not path or not os.path.exists(path):
+        return odds
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            mid = (row.get("match_id") or "").strip()
+            prices = [num(row.get(c), None) for c in ("odd_home_win_1", "odd_draw_x", "odd_away_win_2")]
+            if not mid or None in prices:
+                continue
+            odds.setdefault(mid, []).append({
+                "bookmaker": (row.get("bookmaker") or "").strip(),
+                "home": prices[0], "draw": prices[1], "away": prices[2],
+            })
+    rank = {name: i for i, name in enumerate(BOOKMAKER_ORDER)}
+    for books in odds.values():
+        books.sort(key=lambda b: rank.get(b["bookmaker"], len(rank)))
+    return odds
+
+
 def load_matches(path, results):
     """Returns (matches, configuration_label)."""
     matches = []
@@ -230,6 +255,11 @@ def build(league="bundesliga", matchday=None):
     stammdaten = load_stammdaten(os.path.join(ROOT, *cfg["sources"]["stammdaten"].split("/")))
     results = load_results(results_csv)
     matches, configuration = load_matches(predictions_csv, results)
+    # The odds file keeps played matches too, so snapshot rebuilds read the live one.
+    odds_rel = cfg["sources"].get("odds")
+    odds = load_odds(os.path.join(ROOT, *odds_rel.split("/")) if odds_rel else None)
+    for m in matches:
+        m["odds"] = odds.get(str(m["id"]), [])
 
     raw_matchday, season_year = derive_meta_fields(matches, stammdaten)
     md_number = matchday_number(raw_matchday)
